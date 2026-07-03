@@ -1,8 +1,10 @@
 # Sample config for ringer.py.
 # Copy to ~/.config/ringer/config.toml or pass with --config /path/to/config.toml.
 
-# Default identity stamped into state JSON and eval rows when --identity and env vars
-# are not set. Leave unset for the public fallback: short hostname.
+# Default identity stamped into state JSON and eval rows. Resolution order:
+# --identity flag > FLEET_IDENTITY / RINGER_IDENTITY env > a .fleet-agent file
+# found walking up from the working directory (per-repo agent name) > this
+# value > short hostname.
 # identity_default = "codex-mini"
 
 # State files live under <state_dir>/runs/<run_id>.json.

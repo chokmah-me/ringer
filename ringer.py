@@ -1221,11 +1221,33 @@ def build_run_id(run_name: str) -> str:
     return f"{safe_name or 'ringer'}-{stamp}-p{os.getpid()}"
 
 
+def find_repo_identity(start: Path | None = None) -> str | None:
+    """Per-repo agent identity: nearest .fleet-agent file walking up from cwd.
+
+    Jon's fleet convention (2026-07-02): each repo has its own agent name
+    (projects.agent_name in the fleet DB); a .fleet-agent file in the repo
+    root mirrors it so stdlib-only tools like ringer resolve it without a
+    database connection.
+    """
+    current = (start or Path.cwd()).resolve()
+    for directory in (current, *current.parents):
+        candidate = directory / ".fleet-agent"
+        try:
+            if candidate.is_file():
+                name = re.sub(r"[^A-Za-z0-9_-]", "", candidate.read_text(encoding="utf-8", errors="replace").strip())
+                if name:
+                    return name
+        except OSError:
+            continue
+    return None
+
+
 def resolve_identity(value: str | None, config: AppConfig) -> str:
     for candidate in (
         value,
         os.environ.get("FLEET_IDENTITY"),
         os.environ.get(f"{ENV_VAR_PREFIX}_IDENTITY"),
+        find_repo_identity(),
         config.identity_default,
     ):
         if candidate and candidate.strip():
