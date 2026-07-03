@@ -13,6 +13,12 @@ import shutil
 import socket
 import subprocess
 import sys
+
+if sys.version_info < (3, 11):
+    raise SystemExit(
+        f"ringer requires Python 3.11+ (tomllib); found {sys.version.split()[0]} at {sys.executable}"
+    )
+
 import tempfile
 import threading
 import time
@@ -549,6 +555,7 @@ class StateWriter:
                         "activity": worker_activity(runtime.taskdir / "worker.log", log_tail),
                         "elapsed_s": round(runtime.elapsed_s(now), 1),
                         "tokens": runtime.tokens,
+                        "attempts": runtime.attempts,
                         "children": ProcessTree.count_named_descendants(
                             runtime.worker_pid, children, commands, process_name
                         ),
@@ -673,7 +680,9 @@ class Dashboard:
                 subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
-        print(f"Dashboard: {url}")
+        # flush: under a pipe this line is block-buffered and only appears at
+        # process exit, making live runs look dashboard-less (MBP field report).
+        print(f"Dashboard: {url}", flush=True)
         return self.port
 
     def stop(self) -> None:
@@ -1697,6 +1706,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Keep progress lines live when stdout is a pipe (tee, orchestrators).
+    with contextlib.suppress(Exception):
+        sys.stdout.reconfigure(line_buffering=True)
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

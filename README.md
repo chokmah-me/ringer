@@ -72,6 +72,8 @@ Each task gets its own directory, its own worker, its own log, and its own verdi
 | `full_access` | Worker runs unsandboxed — required for workers that spawn their own sub-workers; must also be enabled in config |
 | `worktrees` (run-level) | Give each task an isolated git worktree of `repo` so parallel workers can't collide |
 
+> **Worktree footgun:** on PASS the task's worktree is removed — including anything written inside it. In worktrees mode, have workers write deliverables outside the worktree, or have your `check` copy artifacts out before it exits 0.
+
 ## Engines are pluggable
 
 ![Identical workers, each under its own light](docs/engines.png)
