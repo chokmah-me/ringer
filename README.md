@@ -1,5 +1,7 @@
 # Ringer
 
+![Ringer — she reviews; the wall works](docs/hero.png)
+
 **Parallel AI-agent swarms that prove their work. Your expensive model plans and reviews; cheap workers do the typing.**
 
 Frontier models are finally good enough to trust with real implementation — but their tokens are priced like senior-engineer hours, and most of a build is not senior-engineer work. It's scaffolding, migrations, test suites, batch transforms. Mechanical labor.
@@ -89,6 +91,8 @@ args_template = ["run", "{spec}", "--dir", "{taskdir}"]
 Per-task `"engine": "mymodel"` routes work to it. `config.sample.toml` ships commented examples for Grok and OpenCode-style setups — the invariants (stdin closed, process-group kill, executed verification, raw logs) apply to every engine identically.
 
 ## Ringside — mission control
+
+![Ringside showing three live swarms under three identities](docs/ringside.png)
 
 A native HUD (Tauri — one codebase for macOS, Windows, Linux) that floats above your work: one section per live swarm with a color-coded identity badge, per-task status chips, elapsed clocks, token burn, and a distinct state for swarms whose orchestrator *died* versus finished — the failure mode every dashboard forgets.
 
