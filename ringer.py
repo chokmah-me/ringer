@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import mimetypes
 import os
 import re
 import shlex
@@ -24,6 +25,7 @@ import threading
 import time
 import tomllib
 import urllib.parse
+import webbrowser
 from dataclasses import dataclass, field, replace as dataclass_replace
 from datetime import datetime, timezone
 from html import escape as html_escape
@@ -43,6 +45,7 @@ DEFAULT_ENGINE_NAME = "codex"
 DEFAULT_TIMEOUT_S = 900
 CHECK_TIMEOUT_S = 60
 DEFAULT_DASHBOARD_PORT_BASE = 8787
+DEFAULT_HUD_PORT = 8700
 DEFAULT_TOKEN_REGEX = r"tokens\s+used\s*:?\s*([0-9][0-9,]*)"
 ACTIVITY_TAIL_BYTES = 2048
 ACTIVITY_TEXT_LIMIT = 80
@@ -57,6 +60,7 @@ CSP_META_TAG = (
     'content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:">'
 )
 DASHBOARD_HTML_PATH = Path(__file__).resolve().parent / "dashboard" / "dashboard.html"
+RINGSIDE_HTML_PATH = Path(__file__).resolve().parent / "dashboard" / "ringside.html"
 MINIMAL_DASHBOARD_HTML = """<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>ringer dashboard</title></head>
@@ -146,6 +150,7 @@ class AppConfig:
     identity_default: str | None
     state_dir: Path
     dashboard_port_base: int
+    hud_port: int
     hud_app_path: Path | None
     allow_full_access: bool
     eval: EvalConfig
@@ -170,6 +175,7 @@ class AppConfig:
         dashboard_port_base = int(data.get("dashboard_port_base", DEFAULT_DASHBOARD_PORT_BASE))
         if dashboard_port_base <= 0:
             raise ValueError("dashboard_port_base must be positive")
+        hud_port = load_hud_port(data.get("hud"))
         identity_default = optional_string(data.get("identity_default"))
         hud_app_path = optional_path(data.get("hud_app_path"))
         allow_full_access = bool(data.get("allow_full_access", False))
@@ -181,6 +187,7 @@ class AppConfig:
             identity_default=identity_default,
             state_dir=state_dir,
             dashboard_port_base=dashboard_port_base,
+            hud_port=hud_port,
             hud_app_path=hud_app_path,
             allow_full_access=allow_full_access,
             eval=eval_config,
@@ -278,6 +285,17 @@ def load_eval_config(raw: Any, state_dir: Path) -> EvalConfig:
     if backend == "postgres" and postgres is None:
         raise ValueError("eval.backend='postgres' requires [eval.postgres].env_file")
     return EvalConfig(backend=backend, jsonl_path=jsonl_path, postgres=postgres)
+
+
+def load_hud_port(raw: Any) -> int:
+    if raw is None:
+        return DEFAULT_HUD_PORT
+    if not isinstance(raw, dict):
+        raise ValueError("hud must be a TOML table")
+    port = int(raw.get("port", DEFAULT_HUD_PORT))
+    if port <= 0:
+        raise ValueError("hud.port must be positive")
+    return port
 
 
 def load_engines(raw: Any) -> dict[str, EngineConfig]:
@@ -2590,7 +2608,86 @@ def artifact_content_type(path: Path) -> str:
         return "text/html; charset=utf-8"
     if suffix == ".json":
         return "application/json; charset=utf-8"
+    guessed, _encoding = mimetypes.guess_type(str(path))
+    if guessed:
+        if guessed.startswith("text/"):
+            return f"{guessed}; charset=utf-8"
+        return guessed
     return "application/octet-stream"
+
+
+def read_ringside_html() -> str:
+    try:
+        return RINGSIDE_HTML_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Ringside</title></head>
+<body><main id="app">dashboard/ringside.html is missing</main></body>
+</html>
+"""
+
+
+def send_response_body(
+    handler: BaseHTTPRequestHandler,
+    status: HTTPStatus,
+    body: bytes,
+    *,
+    content_type: str,
+    no_store: bool = False,
+) -> None:
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    if no_store:
+        handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def send_json_response(handler: BaseHTTPRequestHandler, data: dict[str, Any]) -> None:
+    body = json.dumps(data, sort_keys=True).encode("utf-8")
+    send_response_body(
+        handler,
+        HTTPStatus.OK,
+        body,
+        content_type="application/json; charset=utf-8",
+        no_store=True,
+    )
+
+
+def read_json_object(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return default
+    return data if isinstance(data, dict) else default
+
+
+def scan_hud_run_states(state_dir: Path, *, limit: int = 12) -> list[dict[str, Any]]:
+    runs_dir = state_dir / "runs"
+    try:
+        paths = [path for path in runs_dir.glob("*.json") if path.is_file()]
+    except OSError:
+        return []
+
+    def path_mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    paths.sort(key=path_mtime, reverse=True)
+    runs: list[dict[str, Any]] = []
+    for path in paths[:limit]:
+        data = read_json_object(path, {})
+        if data:
+            runs.append(data)
+    return runs
+
+
+def read_active_runs_file() -> dict[str, Any]:
+    return read_json_object(active_runs_path(), {})
 
 
 def resolve_artifact_http_path(artifact_root: Path, request_path: str) -> Path | None:
@@ -2627,6 +2724,159 @@ def task_log_path_from_state(state_path: Path, task_key: str) -> Path | None:
     return None
 
 
+def run_state_path_for_id(state_dir: Path, run_id: str) -> Path | None:
+    if not run_id:
+        return None
+    runs_root = (state_dir / "runs").resolve()
+    candidate = (runs_root / f"{run_id}.json").resolve()
+    if candidate.parent != runs_root:
+        return None
+    return candidate
+
+
+def hud_task_log_path(state_dir: Path, run_id: str, task_key: str) -> Path | None:
+    state_path = run_state_path_for_id(state_dir, run_id)
+    if state_path is None:
+        return None
+    state = read_json_object(state_path, {})
+    tasks = state.get("tasks")
+    if not isinstance(tasks, list):
+        return None
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("key") != task_key:
+            continue
+        log_path = task.get("log_path")
+        if isinstance(log_path, str) and log_path:
+            return Path(log_path).expanduser()
+        taskdir = task.get("taskdir")
+        if isinstance(taskdir, str) and taskdir:
+            return Path(taskdir).expanduser() / "worker.log"
+    return None
+
+
+def serve_artifact_path(handler: BaseHTTPRequestHandler, artifact_root: Path, path: str) -> bool:
+    artifact_path = resolve_artifact_http_path(artifact_root, path)
+    if artifact_path is None:
+        return False
+    try:
+        if not artifact_path.is_file():
+            raise FileNotFoundError
+        body = artifact_path.read_bytes()
+    except (FileNotFoundError, OSError):
+        handler.send_error(HTTPStatus.NOT_FOUND)
+        return True
+    send_response_body(
+        handler,
+        HTTPStatus.OK,
+        body,
+        content_type=artifact_content_type(artifact_path),
+        no_store=True,
+    )
+    return True
+
+
+class PersistentHudServer:
+    def __init__(
+        self,
+        state_dir: Path,
+        preferred_port: int = DEFAULT_HUD_PORT,
+        *,
+        open_viewer: bool = True,
+    ) -> None:
+        self.state_dir = state_dir
+        self.preferred_port = preferred_port
+        self.open_viewer = open_viewer
+        self.httpd: ThreadingHTTPServer | None = None
+        self.thread: threading.Thread | None = None
+        self.port: int | None = None
+
+    def start(self) -> int:
+        state_dir = self.state_dir
+        artifact_root = artifacts_dir(state_dir)
+        preferred_port = self.preferred_port
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                path = urllib.parse.urlparse(self.path).path
+                if path == "/":
+                    body = read_ringside_html().encode("utf-8")
+                    send_response_body(
+                        self,
+                        HTTPStatus.OK,
+                        body,
+                        content_type="text/html; charset=utf-8",
+                    )
+                    return
+                if path == "/api/runs":
+                    send_json_response(
+                        self,
+                        {
+                            "runs": scan_hud_run_states(state_dir),
+                            "active": read_active_runs_file(),
+                        },
+                    )
+                    return
+                if path == "/api/library":
+                    send_json_response(
+                        self,
+                        read_json_object(artifact_library_path(state_dir), {"artifacts": {}}),
+                    )
+                    return
+                if path.startswith("/artifacts/"):
+                    if not serve_artifact_path(self, artifact_root, path):
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                if path.startswith("/logs/"):
+                    relative = path[len("/logs/") :]
+                    if "/" not in relative:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    run_id_raw, task_key_raw = relative.split("/", 1)
+                    run_id = urllib.parse.unquote(run_id_raw)
+                    task_key = urllib.parse.unquote(task_key_raw)
+                    log_path = hud_task_log_path(state_dir, run_id, task_key)
+                    if log_path is None or not log_path.is_file():
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    body = tail_file_text(log_path, max_bytes=WORKER_LOG_TAIL_BYTES).encode("utf-8")
+                    send_response_body(
+                        self,
+                        HTTPStatus.OK,
+                        body,
+                        content_type="text/plain; charset=utf-8",
+                        no_store=True,
+                    )
+                    return
+                self.send_error(HTTPStatus.NOT_FOUND)
+
+            def log_message(self, _format: str, *_args: Any) -> None:
+                return
+
+        try:
+            self.httpd = ThreadingHTTPServer(("127.0.0.1", preferred_port), Handler)
+        except OSError as exc:
+            raise RuntimeError(
+                f"could not start Ringside on 127.0.0.1:{preferred_port}; "
+                "that port is already in use. Use --port to choose another port."
+            ) from exc
+        self.port = int(self.httpd.server_address[1])
+        self.thread = threading.Thread(target=self.httpd.serve_forever, name="ringer-hud", daemon=True)
+        self.thread.start()
+        url = f"http://127.0.0.1:{self.port}"
+        if self.open_viewer:
+            with contextlib.suppress(Exception):
+                webbrowser.open(url)
+        print(f"Ringside: {url}", flush=True)
+        return self.port
+
+    def stop(self) -> None:
+        if self.httpd is not None:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+        if self.thread is not None:
+            self.thread.join(timeout=2)
+
+
 class Dashboard:
     def __init__(
         self,
@@ -2654,23 +2904,25 @@ class Dashboard:
                 path = urllib.parse.urlparse(self.path).path
                 if path == "/":
                     body = read_dashboard_html().encode("utf-8")
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    send_response_body(
+                        self,
+                        HTTPStatus.OK,
+                        body,
+                        content_type="text/html; charset=utf-8",
+                    )
                     return
                 if path == "/state.json":
                     try:
                         body = state_path.read_bytes()
                     except FileNotFoundError:
                         body = b'{"run_name":"ringer","identity":"unknown","started_at":"","port":null,"dashboard_port":null,"tasks":[],"totals":{"running":0,"done":0,"pass":0,"fail":0,"tokens":0}}'
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    send_response_body(
+                        self,
+                        HTTPStatus.OK,
+                        body,
+                        content_type="application/json; charset=utf-8",
+                        no_store=True,
+                    )
                     return
                 if path.startswith("/logs/"):
                     task_key = urllib.parse.unquote(path[len("/logs/") :])
@@ -2679,28 +2931,15 @@ class Dashboard:
                         self.send_error(HTTPStatus.NOT_FOUND)
                         return
                     body = tail_file_text(log_path, max_bytes=WORKER_LOG_TAIL_BYTES).encode("utf-8")
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    send_response_body(
+                        self,
+                        HTTPStatus.OK,
+                        body,
+                        content_type="text/plain; charset=utf-8",
+                        no_store=True,
+                    )
                     return
-                artifact_path = resolve_artifact_http_path(artifact_root, path)
-                if artifact_path is not None:
-                    try:
-                        if not artifact_path.is_file():
-                            raise FileNotFoundError
-                        body = artifact_path.read_bytes()
-                    except (FileNotFoundError, OSError):
-                        self.send_error(HTTPStatus.NOT_FOUND)
-                        return
-                    self.send_response(HTTPStatus.OK)
-                    self.send_header("Content-Type", artifact_content_type(artifact_path))
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                if serve_artifact_path(self, artifact_root, path):
                     return
                 self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -4039,6 +4278,23 @@ async def run_manifest(
         unregister_active_run(runner.run_id)
 
 
+def run_persistent_hud(config: AppConfig, *, port: int | None, open_viewer: bool) -> int:
+    server = PersistentHudServer(
+        config.state_dir,
+        preferred_port=port if port is not None else config.hud_port,
+        open_viewer=open_viewer,
+    )
+    server.start()
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        print("\nRingside stopped.")
+        return 0
+    finally:
+        server.stop()
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -4068,6 +4324,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     lint_parser = subparsers.add_parser("lint", help="lint a ringer manifest")
     lint_parser.add_argument("manifest", type=Path, help="path to ringer.json")
+
+    hud_parser = subparsers.add_parser("hud", help="start the persistent Ringside page in your browser")
+    hud_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    hud_parser.add_argument("--port", type=int, help=f"port to bind on 127.0.0.1 (default: {DEFAULT_HUD_PORT})")
+    hud_parser.add_argument("--no-open", action="store_true", help="start the server without opening a browser")
 
     demo_parser = subparsers.add_parser("demo", help="generate and run a 3-task toy manifest in /tmp")
     demo_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
@@ -4112,6 +4373,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         config = AppConfig.load(args.config)
+        if args.command == "hud":
+            return run_persistent_hud(
+                config,
+                port=args.port,
+                open_viewer=not args.no_open,
+            )
+
         if args.command == "demo":
             manifest_path = create_demo_manifest()
             print(f"Demo manifest: {manifest_path}")
