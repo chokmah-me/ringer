@@ -233,7 +233,8 @@ class ArtifactLibraryTests(unittest.TestCase):
         wrapper_path = self.state_dir / "artifacts" / "view" / "run-1" / "task-one--worker.log.html"
         wrapper_html = wrapper_path.read_text(encoding="utf-8")
         self.assertIn(CSP_META_TAG, live_html)
-        self.assertIn('<meta http-equiv="refresh" content="2">', live_html)
+        # finish() rewrites the live page as a final snapshot: no self-refresh.
+        self.assertNotIn('<meta http-equiv="refresh"', live_html)
         self.assertIn(CSP_META_TAG, report_html)
         self.assertIn(CSP_META_TAG, wrapper_html)
 
