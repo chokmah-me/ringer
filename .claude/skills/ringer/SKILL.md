@@ -21,7 +21,13 @@ orchestrating model — pay tokens only for specs, orchestration, and review.
 ./ringer.py run manifest.json --identity <who-you-are>
 ./ringer.py demo          # 3-worker smoke test
 ./ringer.py run manifest.json --dry-run   # print the plan, spawn nothing
+./ringer.py lint manifest.json            # check the manifest for swarm-craft mistakes
 ```
+
+Always lint before running: it catches unverifiable checks, silent checks,
+worktree deliverable/commit loss, serial fan-out, write collisions, and
+underspecified specs. `run` prints the same findings as non-blocking
+warnings, but fixing them before spawning workers is cheaper.
 
 Runs land in `~/.ringer/runs/`. Raw worker logs land in `<workdir>/logs/`.
 Full reference: `README.md`. Ready-made manifest skeletons: `templates/`.

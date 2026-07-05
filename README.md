@@ -81,6 +81,19 @@ Each task gets its own directory, its own worker, its own log, and its own verdi
 
 > **Worktree footgun:** on PASS the task's worktree is removed — including anything written inside it. In worktrees mode, worker logs live outside task worktrees in `workdir/logs/`; have workers write deliverables outside the worktree too, or have your `check` copy artifacts out before it exits 0.
 
+## Lint
+
+Lint checks a manifest for the mistakes that make swarms hard to trust: checks that cannot fail, silent checks, worktree deliverables that disappear, worker commits that die with deleted worktrees, serial fan-out, write collisions, and underspecified specs.
+
+```bash
+./ringer.py lint templates/review-swarm.json
+lint: clean (1 tasks)
+```
+
+`run` and `demo` also print any lint findings as non-blocking warnings after the manifest loads. They teach at the moment of use; they do not stop a run.
+
+A check that cannot fail is trusting the worker with extra steps.
+
 ## Engines are pluggable
 
 ![Identical workers, each under its own light](docs/engines.png)

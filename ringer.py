@@ -455,6 +455,118 @@ class Manifest:
         )
 
 
+FILE_TEST_OPS = {"-e", "-f", "-s", "-d", "-r", "-w", "-x", "-L"}
+
+
+def lint_manifest(manifest: Manifest) -> list[str]:
+    findings: list[str] = []
+
+    for task in manifest.tasks:
+        if check_cannot_fail(task.check):
+            findings.append(f"{task.key}: check cannot fail, so the task cannot be verified.")
+        if check_may_fail_silently(task.check):
+            findings.append(
+                f"{task.key}: check may fail without printing why; retry prompt and eval log depend on failure output."
+            )
+        if manifest.worktrees and any(is_relative_expect_file(path) for path in task.expect_files):
+            findings.append(
+                f"{task.key}: deliverable would be deleted with the worktree; write it outside the worktree or export it in the check."
+            )
+        if manifest.worktrees and instructs_git_commit(task.spec):
+            findings.append(
+                f"{task.key}: worker commits die with the worktree; have the worker leave changes uncommitted and export the diff in the check."
+            )
+        if len(task.spec.strip()) < 80:
+            findings.append(
+                f"{task.key}: spec is probably underspecified; workers are stateless and cannot ask questions."
+            )
+
+    if len(manifest.tasks) >= 3 and manifest.max_parallel == 1:
+        findings.append("manifest: tasks will run serially; set max_parallel.")
+
+    if not manifest.worktrees:
+        paths_to_tasks: dict[str, list[str]] = {}
+        for task in manifest.tasks:
+            for path in task.expect_files:
+                paths_to_tasks.setdefault(path, []).append(task.key)
+        for path, task_keys in paths_to_tasks.items():
+            if len(task_keys) >= 2:
+                findings.append(
+                    f"manifest: write collision on {path}: listed by {', '.join(task_keys)}."
+                )
+
+    return findings
+
+
+def check_cannot_fail(check: str) -> bool:
+    stripped = check.strip()
+    if stripped in {"true", ":", "exit 0"}:
+        return True
+    return consists_only_of_echo_commands(stripped)
+
+
+def consists_only_of_echo_commands(command: str) -> bool:
+    if not command or "||" in command or re.search(r"[|<>]", command):
+        return False
+    parts = [part.strip() for part in re.split(r"(?:&&|;|\n)+", command) if part.strip()]
+    if not parts:
+        return False
+    for part in parts:
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            return False
+        if not tokens or tokens[0] != "echo":
+            return False
+    return True
+
+
+def check_may_fail_silently(check: str) -> bool:
+    if "diff -q" in check:
+        return True
+    stripped = check.strip()
+    if not stripped or "||" in stripped:
+        return False
+    if re.search(r"(?:;|\n|\|)", stripped):
+        return False
+    parts = [part.strip() for part in stripped.split("&&") if part.strip()]
+    return bool(parts) and all(is_file_existence_test(part) for part in parts)
+
+
+def is_file_existence_test(command: str) -> bool:
+    command = strip_common_redirections(command.strip())
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    if len(tokens) >= 3 and tokens[0] == "test" and tokens[1] in FILE_TEST_OPS:
+        return True
+    return len(tokens) >= 4 and tokens[0] == "[" and tokens[1] in FILE_TEST_OPS and tokens[-1] == "]"
+
+
+def strip_common_redirections(command: str) -> str:
+    command = re.sub(r"\s+\d?>&\d+\s*$", "", command)
+    command = re.sub(r"\s+\d?>\S+\s*$", "", command)
+    return command.strip()
+
+
+def is_relative_expect_file(path: str) -> bool:
+    return bool(path.strip()) and not path.startswith("~") and not Path(path).is_absolute()
+
+
+def instructs_git_commit(spec: str) -> bool:
+    lower = spec.lower()
+    start = 0
+    while True:
+        index = lower.find("git commit", start)
+        if index == -1:
+            return False
+        prefix = lower[max(0, index - 24) : index]
+        if not re.search(r"(?:do\s+not|don't|never|no)\s+(?:run\s+)?$", prefix):
+            return True
+        start = index + len("git commit")
+
+
 @dataclass
 class TaskRuntime:
     task: TaskSpec
@@ -2229,6 +2341,11 @@ def dry_run(
             print(f"    command: {shell_command_for_display(cmd)} < /dev/null")
 
 
+def print_lint_findings(findings: list[str]) -> None:
+    for finding in findings:
+        print(f"lint: {finding}")
+
+
 def print_summary(run_id: str, runtimes: list[TaskRuntime]) -> None:
     print("\nSummary")
     print(f"run_id: {run_id}")
@@ -2257,20 +2374,20 @@ def create_demo_manifest() -> Path:
         "tasks": [
             {
                 "key": "alpha",
-                "spec": "Create alpha.txt containing exactly: alpha ready",
-                "check": "test \"$(cat alpha.txt 2>/dev/null)\" = \"alpha ready\"",
+                "spec": "Create alpha.txt in the current working directory containing exactly: alpha ready. Do not write any other files.",
+                "check": "test \"$(cat alpha.txt 2>/dev/null)\" = \"alpha ready\" || { echo 'FAIL: alpha.txt missing or content is not alpha ready'; exit 1; }",
                 "expect_files": ["alpha.txt"],
             },
             {
                 "key": "bravo",
-                "spec": "Create bravo.txt containing exactly: bravo ready",
-                "check": "test \"$(cat bravo.txt 2>/dev/null)\" = \"bravo ready\"",
+                "spec": "Create bravo.txt in the current working directory containing exactly: bravo ready. Do not write any other files.",
+                "check": "test \"$(cat bravo.txt 2>/dev/null)\" = \"bravo ready\" || { echo 'FAIL: bravo.txt missing or content is not bravo ready'; exit 1; }",
                 "expect_files": ["bravo.txt"],
             },
             {
                 "key": "charlie",
-                "spec": "Create charlie.txt containing exactly: charlie ready",
-                "check": "test \"$(cat charlie.txt 2>/dev/null)\" = \"charlie ready\"",
+                "spec": "Create charlie.txt in the current working directory containing exactly: charlie ready. Do not write any other files.",
+                "check": "test \"$(cat charlie.txt 2>/dev/null)\" = \"charlie ready\" || { echo 'FAIL: charlie.txt missing or content is not charlie ready'; exit 1; }",
                 "expect_files": ["charlie.txt"],
             },
         ],
@@ -2323,6 +2440,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--dry-run", action="store_true", help="print the plan without spawning codex")
 
+    lint_parser = subparsers.add_parser("lint", help="lint a ringer manifest")
+    lint_parser.add_argument("manifest", type=Path, help="path to ringer.json")
+
     demo_parser = subparsers.add_parser("demo", help="generate and run a 3-task toy manifest in /tmp")
     demo_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     demo_parser.add_argument("--max-parallel", type=int, help="override demo max_parallel")
@@ -2345,6 +2465,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "lint":
+            manifest = Manifest.from_path(args.manifest)
+            findings = lint_manifest(manifest)
+            if findings:
+                print_lint_findings(findings)
+                return 1
+            print(f"lint: clean ({len(manifest.tasks)} tasks)")
+            return 0
+
         config = AppConfig.load(args.config)
         if args.command == "demo":
             manifest_path = create_demo_manifest()
@@ -2352,6 +2481,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             manifest_path = args.manifest
         manifest = Manifest.from_path(manifest_path).with_max_parallel(args.max_parallel)
+        print_lint_findings(lint_manifest(manifest))
         validate_manifest_engines(manifest, config)
         identity_start_paths = [manifest.workdir]
         if manifest.source_path is not None:
