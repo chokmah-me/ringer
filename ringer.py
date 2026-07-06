@@ -1236,15 +1236,22 @@ def catalog_price_equal(left: Any, right: Any) -> bool:
     return catalog_decimal(left) == catalog_decimal(right)
 
 
+def catalog_price_is_negative(value: Any) -> bool:
+    return catalog_decimal(value) < 0
+
+
 def normalize_catalog_model(raw: dict[str, Any], *, fetched_at: str) -> dict[str, Any]:
     pricing = raw.get("pricing")
     pricing_obj = pricing if isinstance(pricing, dict) else {}
     architecture = raw.get("architecture")
     architecture_obj = architecture if isinstance(architecture, dict) else {}
     model_id = str(raw.get("id", "")).strip()
-    prompt_per_m = catalog_per_m(pricing_obj.get("prompt"))
-    completion_per_m = catalog_per_m(pricing_obj.get("completion"))
-    is_free = (
+    variable_pricing = catalog_price_is_negative(pricing_obj.get("prompt")) or catalog_price_is_negative(
+        pricing_obj.get("completion")
+    )
+    prompt_per_m = None if variable_pricing else catalog_per_m(pricing_obj.get("prompt"))
+    completion_per_m = None if variable_pricing else catalog_per_m(pricing_obj.get("completion"))
+    is_free = not variable_pricing and (
         model_id.endswith(":free")
         or (
             catalog_price_equal(pricing_obj.get("prompt"), 0)
@@ -1264,6 +1271,7 @@ def normalize_catalog_model(raw: dict[str, Any], *, fetched_at: str) -> dict[str
         "pricing": dict(pricing_obj),
         "prompt_per_m": prompt_per_m,
         "completion_per_m": completion_per_m,
+        "variable_pricing": variable_pricing,
         "free": is_free,
         "fetched_at": fetched_at,
     }
@@ -1283,9 +1291,13 @@ def normalize_catalog_payload(payload: dict[str, Any], *, fetched_at: str) -> li
     return sorted(models, key=catalog_sort_key)
 
 
-def catalog_sort_key(model: dict[str, Any]) -> tuple[float, str]:
+def catalog_sort_key(model: dict[str, Any]) -> tuple[bool, float, str]:
+    variable_pricing = bool(model.get("variable_pricing"))
     return (
-        float(model.get("prompt_per_m") or 0) + float(model.get("completion_per_m") or 0),
+        variable_pricing,
+        float("inf")
+        if variable_pricing
+        else float(model.get("prompt_per_m") or 0) + float(model.get("completion_per_m") or 0),
         str(model.get("id") or ""),
     )
 
@@ -1322,6 +1334,7 @@ def catalog_event_model_details(model: dict[str, Any]) -> dict[str, Any]:
         "name": model.get("name", ""),
         "prompt_per_m": model.get("prompt_per_m", 0),
         "completion_per_m": model.get("completion_per_m", 0),
+        "variable_pricing": bool(model.get("variable_pricing")),
         "free": bool(model.get("free")),
         "context_length": model.get("context_length", 0),
         "modality": model.get("modality", ""),
@@ -1355,6 +1368,27 @@ def diff_catalog_snapshots(
         new_completion = new.get("completion_per_m", 0)
         old_free = bool(old.get("free"))
         new_free = bool(new.get("free"))
+        old_variable = bool(old.get("variable_pricing"))
+        new_variable = bool(new.get("variable_pricing"))
+        if new_variable:
+            if not old_variable:
+                events.append(
+                    {
+                        "ts": ts,
+                        "kind": "pricing_variable",
+                        "id": model_id,
+                        "name": new.get("name", old.get("name", "")),
+                        "old_prompt_per_m": old_prompt,
+                        "new_prompt_per_m": new_prompt,
+                        "old_completion_per_m": old_completion,
+                        "new_completion_per_m": new_completion,
+                        "old_free": old_free,
+                        "new_free": new_free,
+                    }
+                )
+            continue
+        if old_variable:
+            continue
         price_changed = old_prompt != new_prompt or old_completion != new_completion
         if price_changed:
             events.append(
@@ -1428,7 +1462,9 @@ def refresh_openrouter_catalog(
     )
 
 
-def format_catalog_price(value: Any) -> str:
+def format_catalog_price(value: Any, *, variable: bool = False) -> str:
+    if variable or value is None:
+        return "var"
     amount = float(value or 0)
     if amount == 0:
         return "0"
@@ -1442,11 +1478,12 @@ def print_catalog_table(models: list[dict[str, Any]]) -> None:
     print(header)
     print("-" * len(header))
     for model in sorted(models, key=catalog_sort_key):
+        variable_pricing = bool(model.get("variable_pricing"))
         marker = "FREE" if model.get("free") else ""
         print(
             f"{shorten(str(model.get('id', '')), 48):<48} "
-            f"{format_catalog_price(model.get('prompt_per_m')):>9} "
-            f"{format_catalog_price(model.get('completion_per_m')):>9} "
+            f"{format_catalog_price(model.get('prompt_per_m'), variable=variable_pricing):>9} "
+            f"{format_catalog_price(model.get('completion_per_m'), variable=variable_pricing):>9} "
             f"{int(model.get('context_length') or 0):>8} {marker:<4}"
         )
 
@@ -1483,6 +1520,8 @@ def describe_catalog_event(event: dict[str, Any]) -> str:
         )
     if kind in {"went_free", "went_paid"}:
         return f"{ts} {model_id} {kind}"
+    if kind == "pricing_variable":
+        return f"{ts} {model_id} pricing_variable"
     if kind == "added":
         marker = " FREE" if event.get("free") else ""
         return f"{ts} {model_id} added{marker}"
@@ -1576,7 +1615,11 @@ def catalog_model_is_text_candidate(model: dict[str, Any]) -> bool:
         context_length = int(model.get("context_length") or 0)
     except (TypeError, ValueError):
         context_length = 0
-    return str(model.get("modality", "")).strip().lower() == "text->text" and context_length >= 32000
+    return (
+        not bool(model.get("variable_pricing"))
+        and str(model.get("modality", "")).strip().lower() == "text->text"
+        and context_length >= 32000
+    )
 
 
 def catalog_explore_candidates(

@@ -73,6 +73,7 @@ class CatalogTests(unittest.TestCase):
                     model("paid", prompt="0.0000005", completion="0.0000015"),
                     model("zero", prompt="0", completion="0"),
                     model("promo:free", prompt="0.000002", completion="0.000003"),
+                    model("openrouter/auto", prompt="-1", completion="-1"),
                 ]
             },
             fetched_at="2026-07-06T00:00:00+00:00",
@@ -83,6 +84,10 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(by_id["paid"]["free"])
         self.assertTrue(by_id["zero"]["free"])
         self.assertTrue(by_id["promo:free"]["free"])
+        self.assertIsNone(by_id["openrouter/auto"]["prompt_per_m"])
+        self.assertIsNone(by_id["openrouter/auto"]["completion_per_m"])
+        self.assertTrue(by_id["openrouter/auto"]["variable_pricing"])
+        self.assertFalse(by_id["openrouter/auto"]["free"])
 
     def test_refresh_appends_diff_events(self) -> None:
         snapshot = self.root / "catalog.json"
@@ -124,6 +129,7 @@ class CatalogTests(unittest.TestCase):
             [
                 model("paid", prompt="0.000001", completion="0.000001"),
                 model("free", prompt="0", completion="0"),
+                model("openrouter/auto", prompt="-1", completion="-1"),
             ],
         )
         refresh_openrouter_catalog(snapshot, source=str(source))
@@ -143,6 +149,39 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(0, rc)
         payload = json.loads(out.getvalue())
         self.assertEqual(["free"], [item["id"] for item in payload])
+
+    def test_catalog_table_shows_variable_pricing_after_priced_models(self) -> None:
+        snapshot = self.root / "catalog.json"
+        source = source_file(
+            self.root,
+            "source.json",
+            [
+                model("openrouter/auto", prompt="-1", completion="-1"),
+                model("cheap", prompt="0.0000001", completion="0.0000001"),
+                model("free", prompt="0", completion="0"),
+            ],
+        )
+        refresh_openrouter_catalog(snapshot, source=str(source))
+        args = argparse.Namespace(
+            refresh=False,
+            source=None,
+            file=snapshot,
+            free=False,
+            changes=False,
+            json=False,
+        )
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = run_catalog_command(args)
+
+        self.assertEqual(0, rc)
+        rows = [line for line in out.getvalue().splitlines() if line and not line.startswith(("id", "-"))]
+        self.assertEqual("free", rows[0].split()[0])
+        self.assertEqual("cheap", rows[1].split()[0])
+        self.assertEqual("openrouter/auto", rows[2].split()[0])
+        self.assertIn("      var       var ", rows[2])
+        self.assertNotIn("FREE", rows[2])
 
     def test_models_explore_tiers_and_candidates(self) -> None:
         log_path = self.root / "eval.jsonl"
@@ -179,6 +218,7 @@ class CatalogTests(unittest.TestCase):
                 model("probation-model", prompt="0.000001", completion="0.000001"),
                 model("free-candidate:free", prompt="0.000002", completion="0.000002"),
                 model("cheap-candidate", prompt="0.0000005", completion="0.0000005"),
+                model("openrouter/auto", prompt="-1", completion="-1"),
                 model("image-model", prompt="0", completion="0", modality="text+image->text"),
                 model("small-context", prompt="0", completion="0", context_length=16000),
                 model("embedder", prompt="0", completion="0", modality="text->embedding"),
@@ -223,9 +263,37 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("probation ", output)
         self.assertIn("untested  free-candidate:free", output)
         self.assertIn("untested  cheap-candidate", output)
+        self.assertNotIn("openrouter/auto", output)
         self.assertNotIn("image-model", output)
         self.assertNotIn("small-context", output)
         self.assertNotIn("embedder", output)
+
+    def test_persistent_variable_pricing_logs_once_without_price_or_free_events(self) -> None:
+        snapshot = self.root / "catalog.json"
+        old_source = source_file(
+            self.root,
+            "old.json",
+            [model("openrouter/auto", prompt="0", completion="0")],
+        )
+        sentinel_source = source_file(
+            self.root,
+            "sentinel.json",
+            [model("openrouter/auto", prompt="-1", completion="-1")],
+        )
+
+        refresh_openrouter_catalog(snapshot, source=str(old_source))
+        refresh_openrouter_catalog(snapshot, source=str(sentinel_source))
+        refresh_openrouter_catalog(snapshot, source=str(sentinel_source))
+
+        rows = [
+            json.loads(line)
+            for line in catalog_changes_path(snapshot).read_text(encoding="utf-8").splitlines()
+        ]
+        persisted_rows = [row for row in rows if row["id"] == "openrouter/auto"]
+        self.assertEqual(
+            ["added", "pricing_variable"],
+            [row["kind"] for row in persisted_rows],
+        )
 
     def test_auto_refresh_throttling_env_and_exception_swallowing(self) -> None:
         snapshot = self.root / "catalog.json"
