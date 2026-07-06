@@ -155,6 +155,16 @@ Pattern-selection judgment:
 
 ## Engine selection
 
+**The engine choice belongs to the human.** Before the FIRST run of a job,
+read what's actually wired up (`[engines.<name>]` blocks in
+`~/.config/ringer/config.toml`) and ask the user which model should do the
+typing — present the top 2–3 configured options with a one-line tradeoff
+each and a recommendation, e.g.: *"Codex (strongest all-rounder, runs on
+your existing plan — recommended for this job), GLM-5.2 via OpenCode
+(20–30x cheaper, great for volume work), or a mix — heavy tasks on Codex,
+mechanical ones on GLM?"* Honor their pick via the per-task `engine` field;
+don't re-ask every round of the same job unless the mix isn't working.
+
 Engines are config blocks (`[engines.<name>]` in config.toml), selectable
 per task via the manifest `engine` field. Defaults are deliberate:
 
