@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import os
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from ringer import (  # noqa: E402
+    AppConfig,
+    ArtifactConfig,
+    CatalogRefreshResult,
+    EvalConfig,
+    catalog_changes_path,
+    normalize_catalog_payload,
+    refresh_openrouter_catalog,
+    run_catalog_command,
+    run_models_command,
+    start_catalog_auto_refresh,
+)
+
+
+def source_file(root: Path, name: str, models: list[dict[str, object]]) -> Path:
+    path = root / name
+    path.write_text(json.dumps({"data": models}), encoding="utf-8")
+    return path
+
+
+def model(
+    model_id: str,
+    *,
+    prompt: str,
+    completion: str,
+    context_length: int = 64000,
+    modality: str = "text->text",
+) -> dict[str, object]:
+    return {
+        "id": model_id,
+        "name": model_id,
+        "context_length": context_length,
+        "architecture": {"modality": modality},
+        "pricing": {"prompt": prompt, "completion": completion},
+    }
+
+
+class CatalogTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.old_env = os.environ.copy()
+        self.addCleanup(self.restore_env)
+
+    def restore_env(self) -> None:
+        os.environ.clear()
+        os.environ.update(self.old_env)
+
+    def test_pricing_per_m_and_free_detection(self) -> None:
+        models = normalize_catalog_payload(
+            {
+                "data": [
+                    model("paid", prompt="0.0000005", completion="0.0000015"),
+                    model("zero", prompt="0", completion="0"),
+                    model("promo:free", prompt="0.000002", completion="0.000003"),
+                ]
+            },
+            fetched_at="2026-07-06T00:00:00+00:00",
+        )
+        by_id = {item["id"]: item for item in models}
+        self.assertEqual(0.5, by_id["paid"]["prompt_per_m"])
+        self.assertEqual(1.5, by_id["paid"]["completion_per_m"])
+        self.assertFalse(by_id["paid"]["free"])
+        self.assertTrue(by_id["zero"]["free"])
+        self.assertTrue(by_id["promo:free"]["free"])
+
+    def test_refresh_appends_diff_events(self) -> None:
+        snapshot = self.root / "catalog.json"
+        old_source = source_file(
+            self.root,
+            "old.json",
+            [
+                model("changed", prompt="0.000001", completion="0.000002"),
+                model("removed", prompt="0.000003", completion="0.000004"),
+            ],
+        )
+        new_source = source_file(
+            self.root,
+            "new.json",
+            [
+                model("changed", prompt="0", completion="0"),
+                model("added", prompt="0.000005", completion="0.000006"),
+            ],
+        )
+
+        refresh_openrouter_catalog(snapshot, source=str(old_source))
+        refresh_openrouter_catalog(snapshot, source=str(new_source))
+
+        rows = [
+            json.loads(line)
+            for line in catalog_changes_path(snapshot).read_text(encoding="utf-8").splitlines()
+        ]
+        kinds_by_id = {(row["kind"], row["id"]) for row in rows}
+        self.assertIn(("added", "added"), kinds_by_id)
+        self.assertIn(("removed", "removed"), kinds_by_id)
+        self.assertIn(("price_change", "changed"), kinds_by_id)
+        self.assertIn(("went_free", "changed"), kinds_by_id)
+
+    def test_catalog_free_filter_json_output(self) -> None:
+        snapshot = self.root / "catalog.json"
+        source = source_file(
+            self.root,
+            "source.json",
+            [
+                model("paid", prompt="0.000001", completion="0.000001"),
+                model("free", prompt="0", completion="0"),
+            ],
+        )
+        refresh_openrouter_catalog(snapshot, source=str(source))
+        args = argparse.Namespace(
+            refresh=False,
+            source=None,
+            file=snapshot,
+            free=True,
+            changes=False,
+            json=True,
+        )
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = run_catalog_command(args)
+
+        self.assertEqual(0, rc)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(["free"], [item["id"] for item in payload])
+
+    def test_models_explore_tiers_and_candidates(self) -> None:
+        log_path = self.root / "eval.jsonl"
+        rows = [
+            {
+                "run_id": f"run{i}",
+                "task_key": "task",
+                "worker_engine": "opencode",
+                "model": "proven-model",
+                "task_type": "code-feature",
+                "verdict": "PASS",
+                "logged_at": f"2026-07-0{i}T10:00:00+00:00",
+            }
+            for i in range(1, 4)
+        ]
+        rows.append(
+            {
+                "run_id": "probation-run",
+                "task_key": "task",
+                "worker_engine": "opencode",
+                "model": "probation-model",
+                "task_type": "code-feature",
+                "verdict": "FAIL",
+                "logged_at": "2026-07-04T10:00:00+00:00",
+            }
+        )
+        log_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        catalog_path = self.root / "catalog.json"
+        source = source_file(
+            self.root,
+            "catalog-source.json",
+            [
+                model("proven-model", prompt="0", completion="0"),
+                model("probation-model", prompt="0.000001", completion="0.000001"),
+                model("free-candidate:free", prompt="0.000002", completion="0.000002"),
+                model("cheap-candidate", prompt="0.0000005", completion="0.0000005"),
+                model("image-model", prompt="0", completion="0", modality="text+image->text"),
+                model("small-context", prompt="0", completion="0", context_length=16000),
+                model("embedder", prompt="0", completion="0", modality="text->embedding"),
+            ],
+        )
+        refresh_openrouter_catalog(catalog_path, source=str(source))
+        config = AppConfig(
+            path=None,
+            identity_default=None,
+            state_dir=self.root / "state",
+            dashboard_port_base=8787,
+            hud_port=8700,
+            hud_app_path=None,
+            allow_full_access=False,
+            eval=EvalConfig(backend="jsonl", jsonl_path=log_path),
+            engines={},
+            artifact=ArtifactConfig(
+                enabled=False,
+                out_template=str(self.root / "live.html"),
+                report_template=str(self.root / "report.html"),
+                index_out=self.root / "index.html",
+            ),
+        )
+        args = argparse.Namespace(
+            log=log_path,
+            task_type="code-feature",
+            model=None,
+            engine=None,
+            since=None,
+            explore=True,
+            catalog_file=catalog_path,
+            json=False,
+        )
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = run_models_command(config, args)
+
+        output = out.getvalue()
+        self.assertEqual(0, rc)
+        self.assertIn("proven    ", output)
+        self.assertIn("probation ", output)
+        self.assertIn("untested  free-candidate:free", output)
+        self.assertIn("untested  cheap-candidate", output)
+        self.assertNotIn("image-model", output)
+        self.assertNotIn("small-context", output)
+        self.assertNotIn("embedder", output)
+
+    def test_auto_refresh_throttling_env_and_exception_swallowing(self) -> None:
+        snapshot = self.root / "catalog.json"
+        snapshot.write_text('{"models":[]}', encoding="utf-8")
+        with mock.patch("ringer.refresh_openrouter_catalog") as refresh:
+            self.assertIsNone(start_catalog_auto_refresh(snapshot_path=snapshot, print_notice=False))
+            refresh.assert_not_called()
+
+        stale = time.time() - (25 * 60 * 60)
+        os.utime(snapshot, (stale, stale))
+        with mock.patch("ringer.refresh_openrouter_catalog") as refresh:
+            refresh.return_value = CatalogRefreshResult(
+                path=snapshot,
+                changes_path=catalog_changes_path(snapshot),
+                models=[],
+                events=[],
+            )
+            thread = start_catalog_auto_refresh(snapshot_path=snapshot, print_notice=False)
+            self.assertIsNotNone(thread)
+            assert thread is not None
+            thread.join(timeout=2)
+            refresh.assert_called_once()
+
+        os.environ["RINGER_NO_CATALOG_REFRESH"] = "1"
+        with mock.patch("ringer.refresh_openrouter_catalog") as refresh:
+            self.assertIsNone(start_catalog_auto_refresh(snapshot_path=snapshot, print_notice=False))
+            refresh.assert_not_called()
+        os.environ.pop("RINGER_NO_CATALOG_REFRESH")
+
+        with mock.patch("ringer.refresh_openrouter_catalog", side_effect=RuntimeError("boom")):
+            thread = start_catalog_auto_refresh(snapshot_path=snapshot, print_notice=False)
+            self.assertIsNotNone(thread)
+            assert thread is not None
+            thread.join(timeout=2)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
