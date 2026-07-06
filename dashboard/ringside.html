@@ -631,6 +631,15 @@
       if (state.tab === "artifacts") loadArtifactFrame(false);
     }
 
+    function preserveScroll(mutate) {
+      const scroller = document.scrollingElement || document.documentElement;
+      const pageY = scroller.scrollTop;
+      const railY = els.artifactRail ? els.artifactRail.scrollTop : 0;
+      mutate();
+      scroller.scrollTop = pageY;
+      if (els.artifactRail) els.artifactRail.scrollTop = railY;
+    }
+
     function renderTop() {
       const anyLive = state.runs.some(run => run.state === "live");
       els.topDot.classList.toggle("live", anyLive);
@@ -645,7 +654,7 @@
         empty.className = "empty";
         empty.textContent = "Nothing has run yet. Start something with: ./ringer.py run manifest.json";
         fragment.appendChild(empty);
-        els.runs.replaceChildren(fragment);
+        preserveScroll(() => { els.runs.replaceChildren(fragment); });
         syncLogPolling();
         return;
       }
@@ -745,7 +754,7 @@
         if (runIndex < state.runs.length - 1) section.setAttribute("aria-label", run.run_name);
       });
 
-      els.runs.replaceChildren(fragment);
+      preserveScroll(() => { els.runs.replaceChildren(fragment); });
       syncLogPolling();
     }
 
@@ -1063,7 +1072,7 @@
           rail.appendChild(row);
         });
       }
-      els.artifactRail.replaceChildren(rail);
+      preserveScroll(() => { els.artifactRail.replaceChildren(rail); });
       renderArtifactControls();
       if (state.tab === "artifacts") loadArtifactFrame(false);
     }
@@ -1138,10 +1147,20 @@
         const html = raw.replace(/<meta[^>]+http-equiv=["']?refresh["']?[^>]*>/gi, "");
         if (state.frameKey === target.key && state.frameContent === html) return;
         let frame = els.frameWrap.querySelector("iframe");
-        if (!frame || state.frameKey !== target.key) {
+        const sameDoc = frame && state.frameKey === target.key;
+        let keepScroll = 0;
+        if (sameDoc) {
+          try { keepScroll = frame.contentWindow.scrollY || 0; } catch (_e) { keepScroll = 0; }
+        }
+        if (!frame || !sameDoc) {
           frame = document.createElement("iframe");
           frame.title = `Artifact: ${target.artifact.name}`;
           els.frameWrap.replaceChildren(frame);
+        }
+        if (keepScroll) {
+          frame.addEventListener("load", () => {
+            try { frame.contentWindow.scrollTo(0, keepScroll); } catch (_e) {}
+          }, {once: true});
         }
         frame.srcdoc = html;
         state.frameKey = target.key;
