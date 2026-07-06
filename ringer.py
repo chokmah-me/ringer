@@ -358,6 +358,7 @@ class TaskSpec:
     timeout_s: int = DEFAULT_TIMEOUT_S
     full_access: bool = False
     engine_args: tuple[str, ...] = ()
+    verified: str = ""
 
     @classmethod
     def from_obj(cls, obj: dict[str, Any]) -> "TaskSpec":
@@ -389,6 +390,9 @@ class TaskSpec:
         engine_args = obj.get("engine_args", [])
         if not isinstance(engine_args, list) or not all(isinstance(item, str) for item in engine_args):
             raise ValueError(f"task {key}: engine_args must be a list of strings")
+        verified = obj.get("verified", "")
+        if not isinstance(verified, str):
+            raise ValueError(f"task {key}: verified must be a string (plain-English description of what the check proves)")
         return cls(
             key=key,
             spec=spec,
@@ -398,6 +402,7 @@ class TaskSpec:
             timeout_s=timeout_s,
             full_access=bool(obj.get("full_access", False)),
             engine_args=tuple(engine_args),
+            verified=verified.strip(),
         )
 
 
@@ -511,6 +516,11 @@ def lint_manifest(manifest: Manifest) -> list[str]:
         if len(task.spec.strip()) < 80:
             findings.append(
                 f"{task.key}: spec is probably underspecified; workers are stateless and cannot ask questions."
+            )
+        if not task.verified:
+            findings.append(
+                f"{task.key}: no 'verified' description; a reader of the results page sees "
+                "'checked' but not what the check proves — add one plain-English sentence."
             )
 
     if len(manifest.tasks) >= 3 and manifest.max_parallel == 1:
@@ -895,6 +905,7 @@ class StateWriter:
                         "engine": runtime.task.engine,
                         "spec": runtime.task.spec,
                         "spec_short": runtime.spec_short,
+                        "verified": runtime.task.verified,
                         "check": runtime.task.check,
                         "check_returncode": runtime.last_check_returncode,
                         "check_timed_out": runtime.last_check_timed_out,
@@ -1722,6 +1733,36 @@ ARTIFACT_BASE_CSS = """
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .worker .verified {
+    grid-column: 2 / -1;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 13px;
+    overflow-wrap: break-word;
+  }
+  .worker .proof {
+    grid-column: 2 / -1;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .worker .proof summary {
+    cursor: pointer;
+    color: var(--accent);
+  }
+  .worker .proof pre {
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    max-height: 200px;
+    overflow: auto;
+    border-left: 2px solid var(--hairline);
+    background: var(--surface);
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .worker .links {
     grid-column: 2 / -1;
     font-size: 13px;
@@ -2459,12 +2500,30 @@ def render_task_item(
         force_wrappers=force_wrappers,
     )
 
+    # Close the trust loop for finished work: say in plain English what the
+    # check proved, and keep the raw evidence one click away.
+    verified_html = ""
+    verified_text = str(task.get("verified") or "").strip()
+    if verified_text and bucket in {"pass", "fail"}:
+        proof_tail = str(task.get("check_output_tail") or "").strip()
+        proof_html = (
+            f'<details class="proof"><summary>See the proof</summary>'
+            f"<pre>{html_escape(shorten(proof_tail, 1200))}</pre></details>"
+            if proof_tail
+            else ""
+        )
+        verified_html = (
+            f'<span class="verified">How it was checked: {html_escape(verified_text)}</span>'
+            f"{proof_html}"
+        )
+
     return f"""<div class="worker">
       <span class="glyph {css_bucket}" aria-hidden="true"></span>
       <span class="name" title="{key}">{key}</span>
       <span class="state {css_bucket}">{state_word}</span>
       <span class="time mono">{elapsed}</span>
       {activity_html}
+      {verified_html}
       <span class="links">{links_html}</span>
     </div>"""
 
@@ -3213,6 +3272,12 @@ class RingerRunner:
                 self.dashboard.stop()
             self.logger.close()
             print_summary(self.run_id, self.runtimes)
+            # The post-run journey: tell a human exactly where the results live.
+            with contextlib.suppress(Exception):
+                if self.state_writer.artifact is not None and self.state_writer.artifact.enabled:
+                    results_page = artifact_live_path(self.state_writer.state_dir, self.manifest.run_name)
+                    print(f"\nYour results: {results_page}")
+                    print("Open it in a browser, or run './ringer.py hud' for the full Ringside view (http://127.0.0.1:8700).")
 
     async def kill_all_workers(self) -> None:
         procs = list(self.active_processes.values())
@@ -4048,18 +4113,21 @@ def create_demo_manifest() -> Path:
                 "key": "alpha",
                 "spec": "Create alpha.txt in the current working directory containing exactly: alpha ready. Do not write any other files.",
                 "check": "test \"$(cat alpha.txt 2>/dev/null)\" = \"alpha ready\" || { echo 'FAIL: alpha.txt missing or content is not alpha ready'; exit 1; }",
+                "verified": "alpha.txt exists and contains exactly the expected text",
                 "expect_files": ["alpha.txt"],
             },
             {
                 "key": "bravo",
                 "spec": "Create bravo.txt in the current working directory containing exactly: bravo ready. Do not write any other files.",
                 "check": "test \"$(cat bravo.txt 2>/dev/null)\" = \"bravo ready\" || { echo 'FAIL: bravo.txt missing or content is not bravo ready'; exit 1; }",
+                "verified": "bravo.txt exists and contains exactly the expected text",
                 "expect_files": ["bravo.txt"],
             },
             {
                 "key": "charlie",
                 "spec": "Create charlie.txt in the current working directory containing exactly: charlie ready. Do not write any other files.",
                 "check": "test \"$(cat charlie.txt 2>/dev/null)\" = \"charlie ready\" || { echo 'FAIL: charlie.txt missing or content is not charlie ready'; exit 1; }",
+                "verified": "charlie.txt exists and contains exactly the expected text",
                 "expect_files": ["charlie.txt"],
             },
         ],

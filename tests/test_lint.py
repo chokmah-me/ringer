@@ -59,6 +59,7 @@ class LintManifestTests(unittest.TestCase):
             "spec": spec,
             "check": check,
             "expect_files": ["output.txt"] if expect_files is None else expect_files,
+            "verified": "the output file exists and contains the expected content",
         }
 
     def assertHasFinding(self, findings: list[str], expected: str) -> None:
