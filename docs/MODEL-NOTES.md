@@ -145,6 +145,21 @@ checks and raw logs support — no vibes, no worker self-reports.
   (Ran through an ad-hoc copy of the opencode engine block — the per-task
   `model` field now makes that unnecessary.)
 
+## kimi-k2.6 (`moonshotai/kimi-k2.6`, subject-model evidence via OpenRouter)
+
+- 2026-07-07 — Benchmark Suite 2.0 operator eval, killed by Jon at ~4.5h.
+  Serving throughput, not model quality, was the failure: on the Brick
+  1000-piece case (reasoning xhigh, pinned provider order
+  inceptron→decart→baidu→modelrun, no fallbacks) K2.6 averaged ~21 tok/s
+  with two ~19-min stalls at 4.5 tok/s — 136+ min unfinished vs Sonnet 5's
+  25 min (94 tok/s) and GPT-5.5's 24 min (55 tok/s) on the identical case.
+  Model behavior itself was fine: 28 turns (fewer than Sonnet's 82), 170k
+  output tokens (in family norms), 12% reasoning, zero API errors. Verdict:
+  do NOT schedule K2.6 for long agentic work through that provider set;
+  if K2.6 data is ever wanted, probe a single case against other providers
+  first. Distinct model from k2.7-code above — don't transfer this verdict
+  to k2.7.
+
 
 ## grok-build (Grok CLI engine, flat plan)
 
