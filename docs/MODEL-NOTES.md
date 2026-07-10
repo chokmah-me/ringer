@@ -94,6 +94,13 @@ checks and raw logs support — no vibes, no worker self-reports.
   context: the same task 402'd earlier on a zero-credit OpenRouter account
   — OpenCode requests max_tokens=32000, so the account needs at least that
   much affordable headroom or every GLM call dies pre-model.
+- 2026-07-10 — clean depth batch (3 distinct mechanical probes: sum of
+  squares, factorial, prime count — each write-a-script + executed check):
+  3/3 PASS attempt 1, ~8.3k tokens / ~22s each. This crosses glm into
+  proven-tier for `probe` (now 6 tasks, first_try 0.67; the two remaining
+  FAILs are the pre-funding 402s above, where the model never ran).
+  Confirms glm-5.2 is a reliable cheap default for mechanical
+  write-and-verify work once the account is funded.
 
 - 2026-07-06 — backfill/seed script for the model log (252-line stdlib CLI
   with a run-state join, 3-level mapping precedence, never-overwrite and
