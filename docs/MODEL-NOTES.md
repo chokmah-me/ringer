@@ -346,6 +346,23 @@ checks and raw logs support — no vibes, no worker self-reports.
   ("CREATE this file, ADD these two lines — that IS your allowed edit")
   before the boundaries, or the guardrails read as "touch nothing."
 
+- ROUND 2 (2026-07-10): re-ran the 3 failing lanes with maximally
+  affirmative framing ("you MUST create this file / add these two lines").
+  Still 0/3 — but the cause was NOT spec caution and NOT the algorithm:
+  deepseek-v4-pro engaged hard (63k tok / 500s) but ran a WHOLE-WORKSPACE
+  cargo build, hit `aws-lc-sys` (the AWS crypto C build) failing in this
+  environment, and thrashed on that unrelated error — only 1 edit call, the
+  module file never created. glm-5.2 and deepseek-v4-flash stayed low-token
+  (froze again). NET: on THIS real repo (large workspace + a partially
+  broken aws-lc-sys build + module wiring), the cheap lanes cannot land
+  compilable code while Claude/grok-4.5/grok-composer can — a real
+  execution/navigation signal. But pure ALGORITHM quality for glm/deepseek
+  is STILL untested: they never produced gradeable code. To isolate it,
+  run a minimal scaffold crate (just the IterationEdge type + a stub, no
+  workspace, no aws-lc-sys) so the only variable is writing build_order.
+  Task lesson: scope worker build/verify commands explicitly to
+  `-p <crate>` so a broken sibling crate can't derail them.
+
 ## Process lessons (cross-model)
 
 - 2026-07-10 — READ-MODEL STALENESS after hand-editing the eval log
