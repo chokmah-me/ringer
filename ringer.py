@@ -6751,14 +6751,29 @@ class Verifier:
 
     @staticmethod
     async def _run_check(command: str, cwd: Path) -> tuple[int | None, bool, str]:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(cwd),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-        )
+        # Checks are written in POSIX/bash syntax. asyncio.create_subprocess_shell
+        # runs them through cmd.exe on Windows, which chokes on bash constructs
+        # like `{ ...; exit 1; }`. Route through Git Bash explicitly instead.
+        if os.name == "nt":
+            bash_exe = shutil.which("bash") or r"C:\Program Files\Git\usr\bin\bash.exe"
+            proc = await asyncio.create_subprocess_exec(
+                bash_exe,
+                "-c",
+                command,
+                cwd=str(cwd),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=str(cwd),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
         timed_out = False
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=CHECK_TIMEOUT_S)
