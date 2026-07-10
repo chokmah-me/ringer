@@ -254,6 +254,33 @@ checks and raw logs support — no vibes, no worker self-reports.
   macOS-only — "--sandbox workspace" is accepted but containment is
   process-policy only, so real repo work should use worktrees mode.
 
+## claude-sonnet-5 (via opencode, `openrouter/anthropic/claude-sonnet-5`)
+
+- 2026-07-10 — lane-setup probe (write cubes.py, check executes it): PASS
+  attempt 1, 22.5s, 12.4k tokens. Spot-checked artifact: real
+  `sum(i**3 for i in range(1,11))`, not hardcoded. AUTH ROUTING LESSON:
+  the NATIVE path (`anthropic/claude-sonnet-5` via `ANTHROPIC_API_KEY`
+  env) fails 401 `invalid x-api-key` because that env var holds a Claude
+  Code OAuth token (`sk-ant-oat…`), not an API key (`sk-ant-api…`); the
+  Messages API rejects OAuth tokens. Route Claude through the funded
+  OpenRouter credential instead (works with zero extra setup), or add a
+  real Anthropic API key via `opencode auth login`. All Claude slugs
+  (Haiku/Opus/Fable) ride this same OpenRouter lane via the model field.
+
+## Groq native (via opencode, `groq/*` using `GROQ_API_KEY`)
+
+- 2026-07-10 — lane-setup attempts (gpt-oss-120b, gpt-oss-20b,
+  llama-3.3-70b-versatile): NOT VIABLE on Groq's free `on_demand` tier,
+  skipped per user. Root cause is a throughput floor, not the model or
+  key: opencode's per-request footprint (system prompt + tool defs +
+  output budget) is ~15k tokens even for a trivial probe, but free-tier
+  TPM caps are 8000 (gpt-oss) to 12000 (llama-3.3-70b). Capping output via
+  opencode config (`provider.groq.models.<id>.limit.{context,output}`)
+  dropped requests from ~39k to ~8–15k but still over the cap, and
+  opencode retries the 413 into a throttle death-spiral until timeout.
+  Groq as a Ringer worker lane requires the paid Dev tier (higher TPM).
+  Config override reverted since the lane is skipped.
+
 ## Small / flash-class models
 
 - First to choke on long conversational or multi-turn harness tasks —
