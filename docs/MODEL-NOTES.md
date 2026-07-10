@@ -296,7 +296,38 @@ checks and raw logs support — no vibes, no worker self-reports.
   watch retry counts before scaling them into a batch (2026-07-05 focus
   group lesson).
 
+## Bakeoff — six-lane code ranking (2026-07-10)
+
+- Ran the same 4 algorithmic scenarios (Roman numerals, base-N conversion,
+  JSON-path getter, longest-valid-parentheses) across all six lanes, each
+  graded by executing the artifact against fixed cases with a no-cheat
+  guard. Result: ALL SIX lanes 4/4 first-try. Correctness did not
+  differentiate at this difficulty — every lane writes correct,
+  well-structured code for clearly-specced algorithmic tasks. So route on
+  cost/speed here, not quality. Ranking by ~$/task (blended (in+out)/2 ×
+  observed tokens): deepseek-v4-flash ($0.0013, cheapest) < deepseek-v4-pro
+  ($0.0065) < glm-5.2 ($0.013) < grok-4.5 ($0.038) < claude-sonnet-5
+  ($0.084, ~50% more tokens than the cheap lanes). Fastest avg/task:
+  grok-4.5 28s, deepseek-flash 35s, grok-composer 40s (plan-billed, no
+  token count), glm 41s, deepseek-pro 44s (jsonpath was a 76s outlier),
+  claude 49s. TAKEAWAY: for specced algorithmic code, the cheap lanes
+  (flash/pro/glm) are the rational default; reserve claude/grok-4.5 for
+  tasks hard or fuzzy enough that quality actually separates — this set
+  wasn't. A harder/vaguer scenario set would be needed to find quality gaps.
+
 ## Process lessons (cross-model)
+
+- 2026-07-10 — GRADER FALSE-NEGATIVE (check bug, fixed). First six-lane
+  bakeoff failed claude-sonnet-5 0/1 while the other five passed. Root
+  cause was the grader, not the model: a `re.findall(r'\b(eval|exec|
+  compile|__import__)\b', src)` no-cheat guard matched those words inside
+  claude's own docstring ("no use of eval/exec/compile…"). Claude's parser
+  was correct. Fix: tokenizer-based guard that flags only real NAME usage
+  of the banned builtins, ignoring comments/strings and attribute access
+  (re.compile is fine). Re-ran under the fixed guard: claude 4/4. Lesson —
+  a text-grep for banned tokens punishes models that DOCUMENT their
+  compliance; scan code structure (tokenize/AST), not raw source text.
+
 
 - 2026-07-10 — EVAL-LOG PURGE (Windows machine, user-authorized). Removed
   19 non-PASS rows from `~/.ringer/runs.jsonl` (backup:
