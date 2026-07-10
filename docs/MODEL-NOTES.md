@@ -89,6 +89,11 @@ checks and raw logs support — no vibes, no worker self-reports.
   openrouter-image commands, idempotent batch-runner spec): 3/3 passed on
   attempt 1, ~14.5k tokens each. The "execute these exact commands, do not
   improve them" spec pattern is fully reliable for glm-5.2.
+- 2026-07-09 — first run on the Windows machine (lane-setup probe, write
+  fib.py + executed check): PASS attempt 1, 33s, 8.4k tokens. Account
+  context: the same task 402'd earlier on a zero-credit OpenRouter account
+  — OpenCode requests max_tokens=32000, so the account needs at least that
+  much affordable headroom or every GLM call dies pre-model.
 
 - 2026-07-06 — backfill/seed script for the model log (252-line stdlib CLI
   with a run-state join, 3-level mapping precedence, never-overwrite and
@@ -201,6 +206,47 @@ checks and raw logs support — no vibes, no worker self-reports.
   on long structured code review (after nemotron-3-super) — the exploration
   ladder now says: audition free models on SHORT mechanical tasks first;
   long-diff review is a proven-tier lane.
+- 2026-07-09 — lane-setup probe, $0: never ran. OpenCode requests
+  max_tokens=32000; this free slug's provider (Venice) caps output at
+  16384, so OpenRouter 400'd both attempts before the model saw the spec.
+  Not a model failure — a provider-cap/harness mismatch to remember when
+  routing free slugs through opencode.
+
+## gpt-oss-120b (via opencode, `openrouter/openai/gpt-oss-120b:free`)
+
+- 2026-07-09 — lane-setup probe (write fib.py, check executes it), $0,
+  failed. Attempt set 1: accepted the 32k max_tokens request and reasoned
+  correctly, but wrote to absolute path `/fib.py` (OpenCode
+  FileSystem.writeFile error) and the session then hung to the 300s
+  timeout on both attempts. Attempt set 2 (spec hardened to "RELATIVE path
+  ./fib.py"): zero output before the 180s timeout — consistent with
+  free-tier rate limiting on a zero-credit OpenRouter account after
+  several probe calls. Lesson: free-tier lanes on a zero-credit account
+  are unreliable for anything, including probes; fund the account before
+  judging the model.
+
+## deepseek-v4-pro (via opencode, native provider `deepseek/deepseek-v4-pro`)
+
+- 2026-07-09 — lane-setup probe (write primes.py, check executes it): PASS
+  attempt 1, 14.3s, 8.7k tokens. Native DeepSeek provider via
+  `DEEPSEEK_API_KEY` env var — OpenCode picks it up directly, no
+  OpenRouter routing or credits needed. Spot-checked artifact: real
+  trial-division primality loop, not a hardcoded print.
+
+## deepseek-v4-flash (via opencode, native provider `deepseek/deepseek-v4-flash`)
+
+- 2026-07-09 — lane-setup probe (write fib.py, check executes it): PASS
+  attempt 1, 17.1s, 9.1k tokens. Same native-provider path as v4-pro.
+  Spot-checked artifact: real iterative Fibonacci loop, not hardcoded.
+
+## grok-composer-2.5-fast (via grok CLI, `[engines.grok]`)
+
+- 2026-07-09 — lane-setup probe (write primes.py, check executes it):
+  PASS attempt 1, 21s, plan-billed (no token counts in grok JSON output).
+  First run of the grok engine on this machine (CLI v0.2.91; config flags
+  re-verified against --help). Windows note: grok's Seatbelt sandbox is
+  macOS-only — "--sandbox workspace" is accepted but containment is
+  process-policy only, so real repo work should use worktrees mode.
 
 ## Small / flash-class models
 
