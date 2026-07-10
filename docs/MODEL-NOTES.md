@@ -281,6 +281,15 @@ checks and raw logs support — no vibes, no worker self-reports.
   Groq as a Ringer worker lane requires the paid Dev tier (higher TPM).
   Config override reverted since the lane is skipped.
 
+## grok-4.5 (via opencode, `openrouter/x-ai/grok-4.5`)
+
+- 2026-07-10 — lane-setup probe (write nthprime.py, check executes it):
+  PASS attempt 1, 17s, 8.8k tokens. Routed through the funded OpenRouter
+  credential ($2/$6 per M). Spot-checked artifact: real trial-division
+  nth-prime loop, not hardcoded. Distinct lane from the plan-billed Grok
+  Build CLI (`[engines.grok]`, grok-composer-2.5-fast) — this is
+  pay-per-token access to xAI's grok-4.x reasoning models via OpenRouter.
+
 ## Small / flash-class models
 
 - First to choke on long conversational or multi-turn harness tasks —
