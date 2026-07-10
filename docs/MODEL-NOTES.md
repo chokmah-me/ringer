@@ -96,11 +96,10 @@ checks and raw logs support — no vibes, no worker self-reports.
   much affordable headroom or every GLM call dies pre-model.
 - 2026-07-10 — clean depth batch (3 distinct mechanical probes: sum of
   squares, factorial, prime count — each write-a-script + executed check):
-  3/3 PASS attempt 1, ~8.3k tokens / ~22s each. This crosses glm into
-  proven-tier for `probe` (now 6 tasks, first_try 0.67; the two remaining
-  FAILs are the pre-funding 402s above, where the model never ran).
-  Confirms glm-5.2 is a reliable cheap default for mechanical
-  write-and-verify work once the account is funded.
+  3/3 PASS attempt 1, ~8.3k tokens / ~22s each. Confirms glm-5.2 is a
+  reliable cheap default for mechanical write-and-verify work once the
+  account is funded. After the eval-log purge below, glm's `probe` record
+  is a clean 4/4 first_try 1.00.
 
 - 2026-07-06 — backfill/seed script for the model log (252-line stdlib CLI
   with a run-state join, 3-level mapping precedence, never-overwrite and
@@ -262,6 +261,23 @@ checks and raw logs support — no vibes, no worker self-reports.
   group lesson).
 
 ## Process lessons (cross-model)
+
+- 2026-07-10 — EVAL-LOG PURGE (Windows machine, user-authorized). Removed
+  19 non-PASS rows from `~/.ringer/runs.jsonl` (backup:
+  `runs.jsonl.bak-20260710-prepurge`) after verifying every one was an
+  infrastructure/account/harness failure, never a model producing a wrong
+  answer: 9 `ringer-demo` smoke-test rows (which tripped the pre-fix
+  Windows cmd.exe/bash `_run_check` bug — `'{' is not recognized` — and
+  made codex look 0/6), plus 10 probe fails from pre-funding OpenRouter
+  402s, a provider max_tokens cap (Venice 16384 < opencode's 32000 request
+  on llama-3.3-70b:free), and opencode writing artifacts to absolute paths
+  on Windows. Rows where the model never received the request or never
+  produced judgeable output are not model-performance data; keeping them
+  mislabels account/harness problems as model failures and poisons every
+  routing call. Board went 26→7 rows, all genuine passes. Distinction from
+  the annotate-don't-delete norm below: that norm covers FAILs where the
+  model DID produce correct work a buggy check misjudged — those get
+  annotated and re-run; these rows had no model datum at all.
 
 - 2026-07-06 — the orchestrator's CHECKS were the day's top failure source:
   three check bugs (fixture newline join, first-occurrence ordering vs the
