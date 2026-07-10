@@ -317,6 +317,20 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## Process lessons (cross-model)
 
+- 2026-07-10 — READ-MODEL STALENESS after hand-editing the eval log
+  (operational gotcha). `./ringer.py models` reads the derived SQLite
+  `ringer.db`, which syncs from `runs.jsonl` INCREMENTALLY via a byte
+  cursor. Deleting rows from the MIDDLE of the JSONL (e.g. a purge) shifts
+  every later byte, so the cursor-based sync leaves the read model stale —
+  the scoreboard keeps showing purged rows. FIX: run `./ringer.py db
+  rebuild` after any manual edit to runs.jsonl to drop and re-materialize
+  the DB from source. Applies to every purge in this file — after editing
+  the JSONL, always `db rebuild` and re-verify before trusting the board.
+
+- 2026-07-10 — purged the 2 check-bug claude-sonnet-5 bakeoff rows (the
+  grader false-negative below; backup `runs.jsonl.bak-20260710-claudebakeoff`)
+  and ran `db rebuild`. Claude's bakeoff record is now a clean 4/4.
+
 - 2026-07-10 — GRADER FALSE-NEGATIVE (check bug, fixed). First six-lane
   bakeoff failed claude-sonnet-5 0/1 while the other five passed. Root
   cause was the grader, not the model: a `re.findall(r'\b(eval|exec|
