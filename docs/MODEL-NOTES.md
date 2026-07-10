@@ -315,6 +315,37 @@ checks and raw logs support — no vibes, no worker self-reports.
   tasks hard or fuzzy enough that quality actually separates — this set
   wasn't. A harder/vaguer scenario set would be needed to find quality gaps.
 
+## Bakeoff — hard real-repo task, first real separation (2026-07-10)
+
+- Task: implement `build_order` + `TreeError` (deterministic BFS over an
+  iteration tree with duplicate/missing-parent/cycle detection and strict
+  error precedence) in the REAL PIPL-arch `pipl-core` Rust crate, each lane
+  in an isolated git worktree, verified by injecting a 13-case grader and
+  running `cargo test -p pipl-core`. This finally separated the lanes:
+  - PASSED (correct, idiomatic — spot-checked the exported patches):
+    claude-sonnet-5 (46.5k tok, 225s), grok-4.5 (37.2k tok, 117s — fastest),
+    grok-composer-2.5 (plan-billed, 266s). Claude & grok-4.5 essentially
+    matched the reference algorithm.
+  - FAILED: glm-5.2, deepseek-v4-pro, deepseek-v4-flash. CRUCIAL NUANCE —
+    they did NOT get the algorithm wrong; they made ZERO write/edit tool
+    calls. They read the crate, ran `cargo test` (saw existing tests pass),
+    and stopped without ever writing iteration_tree.rs. glm's final message:
+    "the crate builds/tests pass cleanly, but I don't…"; its reasoning kept
+    circling "outside"/"scope". They froze on the spec's tight boundary
+    language ("do NOT modify anything outside crates/pipl-core/src", "do not
+    commit", etc.) rather than executing the in-scope edit.
+  - HONEST READ: on a real-repo multi-file edit under tight guardrails, the
+    frontier lanes (Claude, grok-4.5) and grok-composer execute; the cheap
+    lanes froze. That is a real capability signal for real work, but it is
+    NOT evidence the cheap models can't write the algorithm — untested,
+    since they never attempted the edit. Contrast the earlier toy bakeoffs
+    where all six wrote correct code first-try: the differentiator here was
+    navigating a real repo under constraints, not algorithmic skill.
+- SPEC-FRAMING LESSON: heavy prohibition language freezes cautious/cheaper
+  models. For real-repo tasks, lead with the affirmative in-scope action
+  ("CREATE this file, ADD these two lines — that IS your allowed edit")
+  before the boundaries, or the guardrails read as "touch nothing."
+
 ## Process lessons (cross-model)
 
 - 2026-07-10 — READ-MODEL STALENESS after hand-editing the eval log
