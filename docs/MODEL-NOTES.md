@@ -363,6 +363,28 @@ checks and raw logs support — no vibes, no worker self-reports.
   Task lesson: scope worker build/verify commands explicitly to
   `-p <crate>` so a broken sibling crate can't derail them.
 
+- ROUND 3 — DEFINITIVE ROOT CAUSE (2026-07-10): stripped ALL repo friction
+  — a throwaway single-file crate (`IterationEdge` + a stub, one dep, no
+  workspace, no aws-lc-sys, no module wiring), task = add build_order +
+  TreeError to src/lib.rs. Result unchanged: claude-sonnet-5, grok-4.5,
+  grok-composer PASS; glm-5.2, deepseek-v4-pro, deepseek-v4-flash FAIL,
+  each ~9k tokens / ~40s, only read/bash calls, src/lib.rs left as the
+  untouched stub. Their final messages are the smoking gun — glm: "Awaiting
+  the spec for build_order"; deepseek-flash: "what should TreeError and
+  build_order look like?"; deepseek-pro ended its turn after reads. They
+  HALT TO ASK FOR A SPEC THAT IS ALREADY IN THE PROMPT, ending the turn
+  conversationally; under opencode `--auto` (non-interactive) that closes
+  the session with nothing written. So the three "failures" across all
+  rounds are an AGENTIC-AUTONOMY failure (bail out and await input on a
+  multi-step repo-edit task), NOT algorithm, spec-framing, or repo size.
+  Corroborates the flash-class note below. Their pure algorithm skill is
+  already known-good from the earlier atomic bakeoffs (all six wrote
+  correct code first-try when the task was "write ONE new file from
+  scratch"); they specifically choke when the task is "read an existing
+  repo, then edit it." ROUTING RULE: for autonomous multi-step repo edits
+  via opencode, use claude-sonnet-5 / grok-4.5 / grok-composer; glm and
+  deepseek are reliable only on atomic single-file/self-contained tasks.
+
 ## Process lessons (cross-model)
 
 - 2026-07-10 — READ-MODEL STALENESS after hand-editing the eval log
