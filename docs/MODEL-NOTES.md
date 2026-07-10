@@ -306,6 +306,14 @@ checks and raw logs support — no vibes, no worker self-reports.
   model DID produce correct work a buggy check misjudged — those get
   annotated and re-run; these rows had no model datum at all.
 
+- 2026-07-10 — SECOND EVAL-LOG PURGE (user-authorized). Removed 16 more
+  non-PASS rows from the Claude/Groq lane-setup attempts (backup:
+  `runs.jsonl.bak-20260710-purge2`), all infrastructure: Groq free-tier
+  TPM throttles (8×gpt-oss-120b, 2×llama-3.3-70b, 2×timeout) and 4 native
+  `anthropic/claude-sonnet-5` 401s from the OAuth-token-in-env issue. Board
+  back to 8 rows, all genuine passes. Same rule as above: no model datum,
+  so not model-performance data.
+
 - 2026-07-06 — the orchestrator's CHECKS were the day's top failure source:
   three check bugs (fixture newline join, first-occurrence ordering vs the
   watchlist strip, claim-prefix split on '.' instead of ':') each produced
