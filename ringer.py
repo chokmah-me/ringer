@@ -6860,14 +6860,24 @@ class RingerRunner:
             final_state = True
             return 0 if all(runtime.status == "pass" for runtime in self.runtimes) else 1
         except asyncio.CancelledError:
+            print(
+                "Run cancelled (KeyboardInterrupt); marking unfinished tasks CANCELLED.",
+                file=sys.stderr,
+                flush=True,
+            )
             await self.kill_all_workers()
             with self.lock:
                 now = time.monotonic()
                 for runtime in self.runtimes:
                     if runtime.status not in {"pass", "fail"}:
                         runtime.status = "fail"
-                        runtime.final_verdict = "ERROR"
+                        # Distinct from ERROR (spawn/config/prepare failures):
+                        # cancel means the operator or harness aborted before/while
+                        # the worker finished — not a model verdict.
+                        runtime.final_verdict = "CANCELLED"
                         runtime.ended_at_monotonic = runtime.ended_at_monotonic or now
+                        if runtime.last_check_output == "":
+                            runtime.last_check_output = "run interrupted"
             self.state_writer.flush()
             final_state = True
             raise
@@ -6878,14 +6888,15 @@ class RingerRunner:
             if self.dashboard is not None:
                 self.dashboard.stop()
             self.logger.close()
-            print_summary(self.run_id, self.runtimes)
-            print("Model log updated; run './ringer.py models' for the per-model scoreboard.")
-            # The post-run journey: tell a human exactly where the results live.
-            with contextlib.suppress(Exception):
-                if self.state_writer.artifact is not None and self.state_writer.artifact.enabled:
-                    results_page = artifact_live_path(self.state_writer.state_dir, self.manifest.run_name)
-                    print(f"\nYour results: {results_page}")
-                    print("Open it in a browser, or run './ringer.py hud' for the full Ringside view (http://127.0.0.1:8700).")
+            with contextlib.suppress(KeyboardInterrupt):
+                print_summary(self.run_id, self.runtimes)
+                print("Model log updated; run './ringer.py models' for the per-model scoreboard.")
+                # The post-run journey: tell a human exactly where the results live.
+                with contextlib.suppress(Exception):
+                    if self.state_writer.artifact is not None and self.state_writer.artifact.enabled:
+                        results_page = artifact_live_path(self.state_writer.state_dir, self.manifest.run_name)
+                        print(f"\nYour results: {results_page}")
+                        print("Open it in a browser, or run './ringer.py hud' for the full Ringside view (http://127.0.0.1:8700).")
 
     async def kill_all_workers(self) -> None:
         procs = list(self.active_processes.values())
@@ -6938,6 +6949,18 @@ class RingerRunner:
                     return
                 if attempt < max_attempts and verdict in {"FAIL", "TIMEOUT"}:
                     failure_context = build_failure_context(runtime.log_path, verify.raw_output_excerpt)
+                    if os.name == "nt":
+                        # The spec travels on the worker argv. Engines installed
+                        # as .cmd shims (npm) spawn via cmd.exe, whose command
+                        # line caps at 8191 chars — an oversized retry spec dies
+                        # with "The command line is too long" before the worker
+                        # ever starts. Keep the tail of the context (the check's
+                        # FAIL lines land last and are the actionable part).
+                        budget = WINDOWS_CMDLINE_SAFE_CHARS - len(runtime.task.spec) - 100
+                        if budget < 200:
+                            budget = 200
+                        if len(failure_context) > budget:
+                            failure_context = failure_context[-budget:]
                     current_spec = (
                         f"{runtime.task.spec}\n\n"
                         f"Previous attempt failed: {failure_context}. Fix it."
@@ -7717,6 +7740,11 @@ def looks_like_assistant_text(line: str) -> bool:
     return bool(re.search(r"[A-Za-z]", line))
 
 
+# cmd.exe rejects command lines over 8191 chars; leave headroom for the
+# engine binary, access/model flags, and the taskdir path around the spec.
+WINDOWS_CMDLINE_SAFE_CHARS = 7500
+
+
 def build_failure_context(log_path: Path, raw_check_output: str) -> str:
     worker_tail = tail_text(log_path)
     context = f"{worker_tail}\n{raw_check_output}".strip()
@@ -7738,28 +7766,58 @@ def append_text(path: Path, text: str) -> None:
         fh.write(text)
 
 
+def _windows_taskkill_tree(pid: int, *, force: bool) -> None:
+    """Kill a process and its descendants on Windows (CreateProcess .cmd trees)."""
+    if pid is None or pid <= 0:
+        return
+    args = ["taskkill", "/PID", str(pid), "/T"]
+    if force:
+        args.append("/F")
+    with contextlib.suppress(Exception):
+        subprocess.run(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+
 def terminate_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Ask a worker (and its process group/tree) to stop gracefully."""
+    if proc.pid is None:
+        return
+    if os.name == "nt":
+        # Soft tree signal first; taskkill without /F sends WM_CLOSE where possible.
+        _windows_taskkill_tree(proc.pid, force=False)
+        with contextlib.suppress(ProcessLookupError):
+            proc.terminate()
+        return
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
         return
     except Exception:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.terminate()
-        except ProcessLookupError:
-            pass
 
 
 def kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Force-kill a worker and its process group/tree."""
+    if proc.pid is None:
+        return
+    if os.name == "nt":
+        _windows_taskkill_tree(proc.pid, force=True)
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        return
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         return
     except Exception:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
 
 
 def shell_command_for_display(parts: Iterable[str]) -> str:
@@ -7838,7 +7896,7 @@ def print_lint_findings(findings: list[str]) -> None:
 def print_summary(run_id: str, runtimes: list[TaskRuntime]) -> None:
     print("\nSummary")
     print(f"run_id: {run_id}")
-    header = f"{'task':<24} {'status':<8} {'verdict':<8} {'attempts':>8} {'tokens':>10} {'elapsed_s':>10}"
+    header = f"{'task':<24} {'status':<8} {'verdict':<10} {'attempts':>8} {'tokens':>10} {'elapsed_s':>10}"
     print(header)
     print("-" * len(header))
     now = time.monotonic()
@@ -7846,7 +7904,7 @@ def print_summary(run_id: str, runtimes: list[TaskRuntime]) -> None:
         tokens = "" if runtime.tokens is None else str(runtime.tokens)
         print(
             f"{runtime.task.key:<24} {runtime.status:<8} "
-            f"{(runtime.final_verdict or ''):<8} {runtime.attempts:>8} "
+            f"{(runtime.final_verdict or ''):<10} {runtime.attempts:>8} "
             f"{tokens:>10} {runtime.elapsed_s(now):>10.1f}"
         )
 
@@ -8340,7 +8398,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
+        # A second Ctrl+C during teardown must not dump a nested traceback.
+        with contextlib.suppress(KeyboardInterrupt):
+            print("\nInterrupted.", file=sys.stderr)
         return 130
     except Exception as exc:
         print(f"ringer.py: error: {exc}", file=sys.stderr)

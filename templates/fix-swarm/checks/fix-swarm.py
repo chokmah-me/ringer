@@ -34,10 +34,14 @@ def output_tail(text: str, limit: int = 4000) -> str:
 
 
 def run_shell(command: str) -> subprocess.CompletedProcess[str]:
+    # Explicit UTF-8: text=True alone uses the locale codepage on Windows
+    # (cp1252), which mangles or refuses UTF-8 output.
     return subprocess.run(
         command,
         shell=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -47,6 +51,18 @@ def run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def run_git_bytes(args: list[str]) -> subprocess.CompletedProcess[bytes]:
+    # The exported patch must be byte-exact: any text-mode decode/re-encode
+    # or newline translation corrupts it so git apply rejects it.
+    return subprocess.run(
+        ["git", *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -92,7 +108,7 @@ def validate_summary(summary_path: Path, exported_summary: Path) -> list[str]:
             failures.append(fail("missing_summary_section", f"fix-summary.md missing '## {heading}'"))
     if not has_placeholder(str(exported_summary)):
         exported_summary.parent.mkdir(parents=True, exist_ok=True)
-        exported_summary.write_text(text, encoding="utf-8")
+        exported_summary.write_text(text, encoding="utf-8", newline="\n")
     return failures
 
 
@@ -149,12 +165,12 @@ def main() -> int:
             if not allowed(changed, owned_files):
                 failures.append(fail("outside_owned_files", f"{changed} is not in the owned-files list"))
 
-    patch_result = run_git(["diff", "--cached", "--binary"])
+    patch_result = run_git_bytes(["diff", "--cached", "--binary"])
     if patch_result.returncode != 0:
-        failures.append(fail("git_diff_failed", output_tail(patch_result.stdout)))
+        failures.append(fail("git_diff_failed", output_tail(patch_result.stdout.decode("utf-8", errors="replace"))))
     elif patch_result.stdout.strip() and not has_placeholder(str(args.patch)):
         args.patch.parent.mkdir(parents=True, exist_ok=True)
-        args.patch.write_text(patch_result.stdout, encoding="utf-8")
+        args.patch.write_bytes(patch_result.stdout)
 
     if not has_placeholder(str(args.patch)) and (not args.patch.is_file() or args.patch.stat().st_size == 0):
         failures.append(fail("patch_not_written", f"{args.patch} was not written or is empty"))
