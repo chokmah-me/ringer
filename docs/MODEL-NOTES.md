@@ -148,6 +148,20 @@ checks and raw logs support — no vibes, no worker self-reports.
   contention findings (full catalog re-ingest per sync; schema writes on
   read paths) plus an empirical XSS all-clear on the new DOM surfaces.
   Third proven-tier structured review today.
+- 2026-07-12/13 — first doc-swarm audition (blueprint kit, real repo,
+  read-only, 3 module-doc tasks against PIPL-arch's sip-core/telemetry-
+  consumer/ledger-signer services): **3/3 PASS**, ~22k-53k tokens/task.
+  Substantively strong: one worker (sip-core) found and fixed a factual error
+  in a stale pre-existing doc (wrong RabbitMQ exchange/routing-key names)
+  by cross-checking against actual source rather than trusting old content.
+  Every recorded FAIL across 3 rounds of this run was an orchestrator
+  check-craft bug (citation text wrongly required inside backticks in the
+  Documented Symbols section so it got treated as a fake symbol; `Type::
+  method`-qualified spans that Rust never spells at a definition site;
+  a fixed 60s-per-example budget blown by a full `cargo test` run instead of
+  `--list`; a global min-section-words floor incompatible with a
+  single-command Examples section and a one-word "None" Assumptions section)
+  — see Process lessons below. None of these were model quality issues.
 
 ## kimi-k2.7 via opencode (`openrouter/moonshotai/kimi-k2.7-code`)
 
@@ -193,6 +207,45 @@ checks and raw logs support — no vibes, no worker self-reports.
   Events/faq/contact fix batch attempt 1, but satisfied "editorial grid" with
   an EMPTY aside landmark — axe caught it (landmark-complementary-is-top-level).
   Persona work: good. Watch for letter-of-the-spec shortcuts on layout asks.
+- 2026-07-10 — AIGrandPrix 4-surface code-review audition (same review-swarm
+  contract as the nemotron Ultra 0/4), engine `grok` / model
+  `grok-composer-2.5-fast`, max_parallel 4: **4/4 PASS attempt 1**, ~60–75s
+  per task (~75s wall). No token counts (flat plan). Reports hit the field
+  contract (Evidence/Impact/Fix/Priority/Confidence, ≤3 summary bullets,
+  ≤1200 words) and cited real file:line evidence. Strong code-review lane
+  relative to free Nemotron Ultra on the same specs.
+
+## qwen3-coder (via opencode, `openrouter/qwen/qwen3-coder:free`)
+
+- 2026-07-10 — AIGrandPrix 4-surface code-review audition (same contract as
+  grok-composer 4/4 and nemotron Ultra 0/4), max_parallel 2, timeout_s 900:
+  **0/4 TIMEOUT** (all attempt 2). ~61 min wall. **Zero model tokens / zero
+  OpenCode JSON events** on every attempt — workers hung after spawn until
+  Ringer's 900s kill; no report.md produced. Serving/free-provider stall, not
+  a judgeable model failure. Do not re-queue this free slug for long agentic
+  review until a short probe (write+execute) returns stream within ~60s; try
+  another free family (e.g. gemma-4-31b or qwen3-next-80b) if free lanes are
+  still wanted.
+
+## nemotron-3-ultra-550b (via opencode, `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`)
+
+- 2026-07-10 — probe smoke (write hello.py + execute): PASS attempt 1, 7.6s,
+  ~9k tokens. Correct OpenRouter free slug is required
+  (`openrouter/nvidia/...:free`); bare `nvidia/...` returns OpenCode
+  UnknownError before the model runs.
+- 2026-07-10 — full AIGrandPrix code-review audition (4 surfaces, review-swarm
+  contract, max_parallel 2, ~15 min, ~461k tokens total, $0): **0/4 PASS** on
+  the executed check (all attempt 2). Substance was real — workers read the
+  repo and wrote multi-finding reports with file:line evidence — but every
+  surface failed the structured-report contract: bold field labels
+  (`**Priority:** P0`) originally rejected by the check (now fixed to tolerate
+  markdown bold), plus summary >3 lines and/or >1200 words and (ekf) one
+  finding missing a file:line cite. After the bold-tolerance check fix,
+  re-validating the same artifacts offline: perception PASS; ekf/neural/
+  thermal still FAIL on length/summary/cite. Same lesson as super-120b: free
+  Ultra can engage a long review but does not yet own the tight report
+  contract; keep proven-tier review lanes on glm/codex until first-try
+  contract passes.
 
 ## nemotron-3-super-120b (via opencode, `openrouter/nvidia/nemotron-3-super-120b-a12b:free`)
 
@@ -266,6 +319,20 @@ checks and raw logs support — no vibes, no worker self-reports.
   OpenRouter credential instead (works with zero extra setup), or add a
   real Anthropic API key via `opencode auth login`. All Claude slugs
   (Haiku/Opus/Fable) ride this same OpenRouter lane via the model field.
+- 2026-07-12/13 — first test-hardening audition (blueprint kit, real repo,
+  worktrees, 2 tasks against `pipl-core`'s untested `envelope.rs` wire format
+  and `chain.rs`'s nonfinite-float encoding gap): **2/2 PASS**, ~45k
+  tokens/task, real coverage added (5→11 and 5→15 total crate tests), zero
+  production-code edits, patches cleanly scoped to the one owned file each.
+  Both attempt-1 runs actually wrote correct, thorough tests; the recorded
+  attempt-2 verdicts across three consecutive re-runs were entirely check
+  bugs on the orchestrator's side (nested-quote argv splitting, a Windows
+  cmd.exe-vs-bash subprocess routing bug in the kit script, and a regex
+  boundary bug undercounting assertions to zero) — see Process lessons below.
+  Once the check was fixed, the worker's own attempt-1 artifact passed
+  outright. Confirms the earlier bakeoff routing rule (real-repo edits go to
+  claude-sonnet-5/grok-4.5/grok-composer, not glm/deepseek) extends cleanly
+  to test-hardening, not just fix work.
 
 ## Groq native (via opencode, `groq/*` using `GROQ_API_KEY`)
 
@@ -289,6 +356,34 @@ checks and raw logs support — no vibes, no worker self-reports.
   nth-prime loop, not hardcoded. Distinct lane from the plan-billed Grok
   Build CLI (`[engines.grok]`, grok-composer-2.5-fast) — this is
   pay-per-token access to xAI's grok-4.x reasoning models via OpenRouter.
+
+## qwen3-next-80b (via opencode, `openrouter/qwen/qwen3-next-80b-a3b-instruct:free`)
+
+- 2026-07-12 — lane-setup probe (write nthfib.py, check executes it): PASS
+  attempt 2, 195.5s, 17.9k tokens, $0. Attempt 1 failed not on the algorithm
+  but on tool use: the model answered conversationally with the code in a
+  fenced markdown block instead of calling the `write` tool, so no file was
+  created and the check correctly failed. Attempt 2 (retry with the failure
+  injected) called `write` and produced a correct iterative loop (not a
+  hardcoded constant). Audition-worthy but watch first-attempt tool-call
+  discipline on plain write tasks before trusting it in an unattended batch.
+- 2026-07-12/13 — full 5-surface PIPL-arch code-review audition (review-swarm
+  contract, real repo, max_parallel 2, ~30 min): **0/5 PASS — all 5 TIMEOUT**
+  at the 900s×2 budget (19.5k–71.8k tokens burned per surface before the
+  kill). One surface (`telemetry-consumer`) left behind a `report.md` that
+  actually satisfied the review contract when checked after the fact, so the
+  model CAN produce evidence-cited, correctly-structured findings on real
+  repo code — but never finished inside budget on any of the 5 attempts.
+  WORSE: the `sip-core` worker on one attempt wrote its `report.md` directly
+  into the real repo (`services/sip-core/src/report.md`) instead of its task
+  directory — a boundary violation on a spec that explicitly says "never
+  modify/create anything in that repo." Combined verdict: this model is a
+  genuine serving/throughput casualty on long multi-file real-repo review
+  work (same family of failure as qwen3-coder:free and nemotron-3-ultra
+  above), AND it does not reliably respect output-location boundaries under
+  real-repo exploration the way the trivial single-file probe suggested.
+  Do not route qwen3-next-80b:free at unattended real-repo review work;
+  a short mechanical write-and-verify task is still fine.
 
 ## Small / flash-class models
 
@@ -387,6 +482,52 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## Process lessons (cross-model)
 
+- 2026-07-12/13 — FIRST BLUEPRINT-KIT AUDITIONS (test-hardening, doc-swarm):
+  every recorded FAIL across both kits' first real-repo runs was an
+  orchestrator check-craft bug, not a model quality problem — exactly what
+  "Blueprint — adapt with care" warns about. Fixed, permanent lessons:
+  (1) never nest a single-quoted sub-string (e.g. `grep -c ': test$'`) inside
+  a `--flag '...'` value that is itself single-quoted — the inner `'`
+  prematurely closes the outer quote and silently splits argv, producing
+  a baffling "unrecognized arguments" error far from the real cause; use
+  double quotes for the inner string instead. (2) `test_hardening_check.py`'s
+  `run_tests()` called `subprocess.run(command, shell=True)`, which on
+  Windows resolves to cmd.exe and chokes on bash constructs like `export`
+  and `$(...)` — fixed to route through `bash -c` on Windows explicitly,
+  the same pattern `ringer.py`'s own `_run_check` already uses. This is a
+  permanent fix to `templates/test-hardening/checks/test_hardening_check.py`,
+  not a per-run workaround. (3) an assertion-counting regex
+  `\b(assert_eq!|assert_ne!|assert!)\b` had a trailing `\b` immediately after
+  `!`, but real call sites are followed by `(` — a non-word char — so the
+  boundary never matched and every file undercounted to zero assertions;
+  drop the trailing `\b`. (4) doc-swarm's symbol-existence check treats
+  EVERY backtick span inside the Documented Symbols section as a claimed
+  source symbol requiring a literal grep match — so a spec that tells
+  workers to backtick both the symbol AND its `file.rs:42` citation on the
+  same line poisons the check with citations that obviously don't appear
+  verbatim in source. Keep citations as plain unbacktracked parenthetical
+  text in that section. Rust also never spells a `Type::method` qualified
+  path at its definition site, so require bare identifiers only (`submit`,
+  not `Mirror::submit`); use `--symbol-allowlist` for legitimately
+  non-literal terms (HTTP headers, AWS API names, URI templates) instead of
+  fighting the model's natural tendency to reference them. (5) doc-swarm's
+  per-example runnable-code check has a hard-coded 60s timeout; a spec that
+  doesn't forbid a second, slower fenced block (e.g. a full `cargo test` run
+  instead of `--list`) will eventually blow it on a cold build. (6) a global
+  `--min-section-words` floor applied uniformly to every required section
+  cannot coexist with a spec that also asks for a single-command Examples
+  section or a one-word "None" Assumptions section — either lower the floor
+  or require a full sentence even for the "none" case; don't leave the two
+  instructions contradicting each other.
+- 2026-07-12/13 — WORKTREE REUSE AFTER A FAILED TASK (operational gotcha,
+  Windows). A task that fails (not passes) leaves its worktree registered;
+  re-running a manifest with the same `workdir`/task keys tries to create a
+  new worktree at the same already-registered path and errors at the harness
+  level before the worker even starts (0 tokens, 0s elapsed, empty log).
+  `git worktree remove --force` can itself fail with "Permission denied" on
+  Windows if something still holds a handle inside `.git/worktrees/<name>`
+  (observed here with no obviously-related process running). Cheapest fix:
+  point the retry at a fresh `workdir` rather than fight the lock.
 - 2026-07-10 — READ-MODEL STALENESS after hand-editing the eval log
   (operational gotcha). `./ringer.py models` reads the derived SQLite
   `ringer.db`, which syncs from `runs.jsonl` INCREMENTALLY via a byte

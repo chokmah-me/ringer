@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -147,9 +149,20 @@ def validate_assertions(files: list[str], assertion_pattern: str, min_per_file: 
 
 
 def run_tests(command: str) -> tuple[bool, str]:
+    # TEST_COMMAND is written in POSIX/bash syntax. subprocess.run(shell=True)
+    # routes through cmd.exe on Windows, which chokes on bash constructs like
+    # `export` and `$(...)`. Route through Git Bash explicitly instead (same
+    # fix as ringer.py's own _run_check).
+    if os.name == "nt":
+        bash_exe = shutil.which("bash") or r"C:\Program Files\Git\usr\bin\bash.exe"
+        args: list[str] | str = [bash_exe, "-c", command]
+        use_shell = False
+    else:
+        args = command
+        use_shell = True
     proc = subprocess.run(
-        command,
-        shell=True,
+        args,
+        shell=use_shell,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

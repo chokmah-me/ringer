@@ -72,3 +72,48 @@ source = "manifest model field; OpenRouter slug moonshotai/kimi-k2.7-code"
 display = "Nemotron 3 Super 120B (free)"
 confidence = "verified"
 source = "manifest model field; OpenRouter slug nvidia/nemotron-3-super-120b-a12b:free"
+
+[engines.opencode.models."openrouter/qwen/qwen3-next-80b-a3b-instruct:free"]
+display = "Qwen3 Next 80B Instruct (free)"
+confidence = "verified"     # see MODEL-NOTES 2026-07-12: PASS attempt 2 — attempt 1 answered conversationally instead of calling write
+source = "manifest model field; OpenRouter slug qwen/qwen3-next-80b-a3b-instruct:free"
+
+[engines.opencode.models."openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"]
+display = "Nemotron 3 Ultra 550B (free)"
+confidence = "verified"
+source = "manifest model field; OpenRouter slug nvidia/nemotron-3-ultra-550b-a55b:free"
+
+[engines.opencode.models."openrouter/qwen/qwen3-coder:free"]
+display = "Qwen3 Coder (free)"
+confidence = "verified"     # see MODEL-NOTES 2026-07-10: serving stalls, 0/4 timeout on long review — audition free with short probes only
+source = "manifest model field; OpenRouter slug qwen/qwen3-coder:free"
+
+[engines.opencode.models."openrouter/meta-llama/llama-3.3-70b-instruct:free"]
+display = "Llama 3.3 70B Instruct (free)"
+confidence = "verified"     # see MODEL-NOTES: failed structured-review audition; provider (Venice) caps output below OpenCode's request
+source = "manifest model field; OpenRouter slug meta-llama/llama-3.3-70b-instruct:free"
+
+[engines.opencode.models."openrouter/openai/gpt-oss-120b:free"]
+display = "GPT-OSS 120B (free)"
+confidence = "verified"     # see MODEL-NOTES: unreliable on a zero-credit account; fund before judging
+source = "manifest model field; OpenRouter slug openai/gpt-oss-120b:free"
+
+[engines.opencode.models."openrouter/anthropic/claude-sonnet-5"]
+display = "Claude Sonnet 5"
+confidence = "verified"     # route Claude via OpenRouter, not the native anthropic/ provider — native fails 401 on a Claude Code OAuth token
+source = "manifest model field; OpenRouter slug anthropic/claude-sonnet-5"
+
+[engines.opencode.models."openrouter/x-ai/grok-4.5"]
+display = "Grok 4.5"
+confidence = "verified"     # pay-per-token via OpenRouter; distinct lane from the plan-billed grok engine
+source = "manifest model field; OpenRouter slug x-ai/grok-4.5"
+
+[engines.opencode.models."deepseek/deepseek-v4-pro"]
+display = "DeepSeek V4 Pro"
+confidence = "verified"     # native DeepSeek provider via DEEPSEEK_API_KEY, no OpenRouter routing
+source = "manifest model field; native provider deepseek/deepseek-v4-pro"
+
+[engines.opencode.models."deepseek/deepseek-v4-flash"]
+display = "DeepSeek V4 Flash"
+confidence = "verified"     # native DeepSeek provider via DEEPSEEK_API_KEY, no OpenRouter routing
+source = "manifest model field; native provider deepseek/deepseek-v4-flash"
