@@ -482,6 +482,37 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## Process lessons (cross-model)
 
+- 2026-07-13 — SIX-ATTEMPT SAGA on one fix-swarm task (deltas-hash-coverage),
+  every failure a different infrastructure issue, none a model problem: (1-3)
+  the background run got killed externally three times in a row (once after
+  30+ min on a cold multi-crate build, twice within ~3 min even after
+  reducing to serial execution) — cause never fully identified, but pointing
+  CARGO_TARGET_DIR at the real repo's already-warm target/ dir (instead of
+  each worktree cold-compiling ~60 aws-sdk/crypto crates from scratch) and
+  running in the FOREGROUND instead of backgrounded made the next attempt
+  finish in 75s instead of 30+ min — do this by default for any worktree
+  task in a heavy-dependency crate. (4) a real, reusable harness bug: the
+  spec text contained literal `format!("{id}|{verdict}|...")` examples with
+  bare `|` characters inside backticks; opencode.cmd's Windows batch
+  argument-forwarding re-interpreted the `|` as a cmd.exe PIPE OPERATOR,
+  splitting the command mid-argument and leaving a bare `{verdict}` that
+  cmd.exe tried to execute as a program name (`'{verdict}' is not
+  recognized...`, rc=255) — a spec with zero output produced. LESSON: never
+  put literal shell metacharacters (`|`, backticks, `&`, redirects) inside a
+  spec's example code on Windows; describe the format in prose ("joined
+  with a delimiter character") instead of a literal format-string example.
+  (5) switched engine to grok (grok-composer-2.5-fast) after OpenRouter
+  credits ran out mid-session for claude-sonnet-5 (a 402 on request, not a
+  model failure) — the grok CLI genuinely fixed the code correctly, but
+  left its own `terminals/{1,2,3,4}.txt` + `.next-id` session-transcript
+  files in the worktree's cwd, which `git add -A` swept into the exported
+  patch and tripped the ownership check. LESSON: grok-engine worktree tasks
+  need `terminals/` (or wherever this CLI writes session logs) added to the
+  ownership exclusion / gitignore before export, the same way opencode
+  tasks need care around gitignored build dirs. The actual code fix was
+  correct on the very first grok attempt once the pipe-character spec bug
+  was gone — extracted by hand from the worktree's staged diff (excluding
+  `terminals/`) rather than re-running the swarm a 7th time.
 - 2026-07-12/13 — FIRST BLUEPRINT-KIT AUDITIONS (test-hardening, doc-swarm):
   every recorded FAIL across both kits' first real-repo runs was an
   orchestrator check-craft bug, not a model quality problem — exactly what
