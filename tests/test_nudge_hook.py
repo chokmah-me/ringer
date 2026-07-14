@@ -77,6 +77,18 @@ class NudgeHookTests(unittest.TestCase):
             data["hookSpecificOutput"],
         )
 
+    def assertAsked(self, proc: subprocess.CompletedProcess[str], event_name: str) -> None:
+        self.assertEqual(0, proc.returncode)
+        data = json.loads(proc.stdout)
+        self.assertEqual(
+            {
+                "hookEventName": event_name,
+                "permissionDecision": "ask",
+                "permissionDecisionReason": NUDGE_TEXT,
+            },
+            data["hookSpecificOutput"],
+        )
+
     def assertSilent(self, proc: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(0, proc.returncode)
         self.assertEqual("", proc.stdout)
@@ -95,14 +107,14 @@ class NudgeHookTests(unittest.TestCase):
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
 
-    def test_pre_bash_nudges_on_harness_script(self) -> None:
+    def test_pre_bash_asks_on_harness_script(self) -> None:
         proc = self.run_hook("pre-bash", self.pre_bash_payload("node probe-simulate.mjs"))
-        self.assertNudged(proc, "PreToolUse")
+        self.assertAsked(proc, "PreToolUse")
 
-    def test_pre_bash_nudges_on_provider_endpoint(self) -> None:
+    def test_pre_bash_asks_on_provider_endpoint(self) -> None:
         payload = self.pre_bash_payload("curl https://api.anthropic.com/v1/messages", "session-2")
         proc = self.run_hook("pre-bash", payload)
-        self.assertNudged(proc, "PreToolUse")
+        self.assertAsked(proc, "PreToolUse")
 
     def test_pre_bash_stays_silent_on_ordinary_command(self) -> None:
         proc = self.run_hook("pre-bash", self.pre_bash_payload("ls -la"))
@@ -117,11 +129,13 @@ class NudgeHookTests(unittest.TestCase):
         proc = self.run_hook("pre-bash", self.pre_bash_payload("node probe-simulate.mjs"))
         self.assertSilent(proc)
 
-    def test_pre_bash_dedupes_per_session(self) -> None:
+    def test_pre_bash_asks_every_time_no_dedupe(self) -> None:
+        # Unlike post-edit, pre-bash intentionally does not dedupe: an ask-gate that only
+        # fired once per session would let every subsequent violation through silently.
         first = self.run_hook("pre-bash", self.pre_bash_payload("node probe-simulate.mjs"))
         second = self.run_hook("pre-bash", self.pre_bash_payload("curl https://api.openai.com/v1/chat/completions"))
-        self.assertNudged(first, "PreToolUse")
-        self.assertSilent(second)
+        self.assertAsked(first, "PreToolUse")
+        self.assertAsked(second, "PreToolUse")
 
     def test_post_edit_nudges_at_eight_edits_and_three_files_once(self) -> None:
         files = [
