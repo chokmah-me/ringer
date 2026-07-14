@@ -67,9 +67,19 @@ def validate_report(path: Path, surface: str) -> list[str]:
                     failures.append(fail("finding_missing_field", f"finding {index} is missing {field}"))
             if "Evidence:" in block and not re.search(r"\b[\w./-]+:\d+\b", block):
                 failures.append(fail("finding_missing_line", f"finding {index} evidence should cite file:line"))
-            if not re.search(r"Priority:\s*P[0-3]\b", block, re.IGNORECASE):
+            # Tolerate markdown bold around labels/values (**Priority:** P0, **P0**, etc.).
+            # Substance is the P-level / confidence word, not whether the worker bolded the label.
+            if not re.search(
+                r"\*{0,2}Priority:\*{0,2}\s*\*{0,2}P[0-3]\b",
+                block,
+                re.IGNORECASE,
+            ):
                 failures.append(fail("finding_bad_priority", f"finding {index} priority must be P0, P1, P2, or P3"))
-            if not re.search(r"Confidence:\s*(high|medium|low)\b", block, re.IGNORECASE):
+            if not re.search(
+                r"\*{0,2}Confidence:\*{0,2}\s*\*{0,2}(high|medium|low)\b",
+                block,
+                re.IGNORECASE,
+            ):
                 failures.append(fail("finding_bad_confidence", f"finding {index} confidence must be high, medium, or low"))
     elif "no findings" not in findings.lower():
         failures.append(fail("findings_not_explicit", "Findings must contain at least one '### Finding:' block or say 'No findings'"))
