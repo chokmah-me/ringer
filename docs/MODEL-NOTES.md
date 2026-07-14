@@ -348,6 +348,42 @@ checks and raw logs support — no vibes, no worker self-reports.
   Groq as a Ringer worker lane requires the paid Dev tier (higher TPM).
   Config override reverted since the lane is skipped.
 
+## claude-fable-5 (via opencode, `openrouter/anthropic/claude-fable-5`)
+
+- 2026-07-13/14 — real-repo edit probe: same throwaway single-file crate +
+  hidden 13-case grader as the ROUND 3 iteration-tree bakeoff (`build_order`
+  + `TreeError`, BFS semantics, exact signatures given in full). **PASS,
+  attempt 2** (65.5k tok, 326s). Attempt 1 engaged fully — wrote real code,
+  ran real tests, self-reported "10 tests pass" — but HALLUCINATED that the
+  spec was truncated ("Your message cut off after the scaffold description")
+  even though the exact signatures/semantics were present in full, and
+  improvised different semantics (ancestor-chain ordering, differently-shaped
+  `TreeError`) instead of using the given contract. Attempt 2, with the
+  grader's failure injected, re-read the same spec correctly and matched it
+  exactly — confirmed against the exported patch (real BFS/VecDeque
+  traversal, correct variant shapes). ROUTING NOTE: distinct failure mode
+  from glm/deepseek's freeze-and-ask — Fable doesn't refuse, it confidently
+  substitutes its own spec. Don't trust attempt-1 output against an exact
+  contract without checking it actually used the given signatures, even when
+  the model's own summary claims full test coverage.
+- Slug correction: the bare alias `openrouter/anthropic/claude-fable`
+  (no version) 400s instantly via OpenCode (`UnknownError`, 0 tokens) — the
+  real OpenRouter catalog id is `anthropic/claude-fable-5`. Same lesson
+  applies to `claude-opus` below.
+
+## claude-opus-4.8 (via opencode, `openrouter/anthropic/claude-opus-4.8`)
+
+- 2026-07-13/14 — same real-repo edit probe as claude-fable-5 above, run in
+  parallel: **PASS, attempt 2** (61.5k tok, 272s). Identical failure mode to
+  Fable on attempt 1 — spontaneously declared the (complete, untruncated)
+  spec "truncated" and substituted its own ordering/error-shape design
+  rather than the exact contract given; corrected on the retry once the
+  grader's failure was injected. Confirmed against the exported patch (real
+  BFS traversal with a HashMap/HashSet/VecDeque implementation, exact
+  `TreeError` variant shapes). Bare alias `openrouter/anthropic/claude-opus`
+  (no version) fails identically to Fable's bare alias — use
+  `anthropic/claude-opus-4.8`.
+
 ## grok-4.5 (via opencode, `openrouter/x-ai/grok-4.5`)
 
 - 2026-07-10 — lane-setup probe (write nthprime.py, check executes it):

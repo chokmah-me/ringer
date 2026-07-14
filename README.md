@@ -286,6 +286,23 @@ The promotion ladder is the point. A model enters as **untested**. You spend a s
 
 The per-user philosophy, stated plainly: every user's workload is different, so the scoreboard learns what works for *your* tasks on *your* machine. A model that's proven in someone else's log is untested in yours until you've run it. The numbers are not portable between users, and the routing recommendations get personal as the log grows — which is exactly why the catalog and the change log stay local and the explore tiers are computed from your own `runs.jsonl`, not from anyone's aggregate.
 
+### Current routing recommendations (this machine's log)
+
+A live snapshot of what `./ringer.py models --explore` and `docs/MODEL-NOTES.md` currently support, for the model mix in active use here. Re-derive from the scoreboard as evidence accumulates — this table is a summary, not the source of truth.
+
+| Model | Lane | Evidence |
+|---|---|---|
+| `openrouter/anthropic/claude-sonnet-5` | Autonomous real-repo multi-file edits, test-hardening | Passed the real-edit bakeoff attempt-1; 2/2 test-hardening with genuine new coverage |
+| `grok-composer-2.5-fast` (Grok CLI) | Autonomous real-repo edits, structured code review | Attempt-1 on the real-edit bakeoff; 4/4 code-review audition |
+| `openrouter/x-ai/grok-4.5` | Second real-repo edit lane, fastest wall-clock | Attempt-1 on the real-edit bakeoff (fastest of all six lanes) |
+| `openrouter/anthropic/claude-opus-4.8` | Real-repo edits where deep reasoning matters | Passed the real-edit bakeoff, but only attempt 2 — attempt 1 hallucinated a "truncated" spec and substituted its own contract despite the full spec being present. Don't trust attempt-1 output against an exact contract without checking it used the given signatures |
+| `openrouter/anthropic/claude-fable-5` | Second general-purpose lane, same caveat as Opus | Same probe, same result: attempt-2 pass, identical spec-hallucination failure mode on attempt 1 |
+| `openrouter/z-ai/glm-5.2` | Structured code review, doc-swarm generation, persona/focus-group work, mechanical/template-driven builds | 3x proven-tier review passes; 3/3 doc-swarm; reliable cheap default for atomic write-and-verify tasks |
+| `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-pro` (native, no OpenRouter credits) | Atomic single-file tasks only: scripts, format conversions, fully-specified algorithms | Cheapest lanes by far, but froze 3/3 times on "read repo, then edit" tasks — halted to ask for a spec already in the prompt. Never route explore-then-modify work here |
+| `codex` (default engine) | Heavy real-repo feature work, review→fix roundtrips | Best-evidenced lane at weight: 8/8 feature tasks, 5 substantial ringer.py features, proven review→fix loop — none of the above have been tested at that scale |
+
+Two standing cautions from this evidence: (1) DeepSeek and GLM share one failure mode — they never attempt an edit outside a fully self-contained file, they just stop and ask. (2) Fable and Opus share a different one — they *do* attempt the edit, confidently, using a spec they invented instead of the one given, even when the real spec was complete. Both are real capability gaps, not spec-clarity problems; see `docs/MODEL-NOTES.md` for the dated run entries behind each line.
+
 ## Hard-won invariants
 
 Four rules are baked into every worker invocation. They all cost us real debugging hours; you get them for free:
