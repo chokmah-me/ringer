@@ -130,6 +130,20 @@ def output_nudge(event_name: str) -> None:
     sys.stdout.write("\n")
 
 
+def output_ask(event_name: str) -> None:
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "permissionDecision": "ask",
+                "permissionDecisionReason": NUDGE_TEXT,
+            }
+        },
+        sys.stdout,
+    )
+    sys.stdout.write("\n")
+
+
 def command_references_active_workdir(command: str, active_runs: dict[str, dict[str, Any]]) -> bool:
     for entry in active_runs.values():
         workdir = str(entry.get("workdir") or "").strip()
@@ -223,8 +237,8 @@ def run(argv: list[str]) -> int:
     session_id = payload.get("session_id")
 
     if mode == "pre-bash":
-        if should_nudge_pre_bash(payload, home) and claim_dedupe_marker(home, session_id, mode):
-            output_nudge("PreToolUse")
+        if should_nudge_pre_bash(payload, home):
+            output_ask("PreToolUse")
         return 0
 
     if should_nudge_post_edit(payload, home) and claim_dedupe_marker(home, session_id, mode):
