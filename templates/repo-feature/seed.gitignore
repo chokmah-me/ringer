@@ -1,0 +1,15 @@
+# Copy into audition / bakeoff fixture seeds and commit before the run.
+# The repo-feature check also allowlists these as git-status noise by default;
+# seeding .gitignore keeps the tree clean under older check copies and for humans.
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/

@@ -14,7 +14,7 @@ Use this for narrowly scoped app pages, route additions, component changes, scri
 
 | Placeholder | What goes there |
 |---|---|
-| `{{ALLOWED_STATUS_PATHS_CSV}}` | Additional pre-existing or explicitly allowed git-status paths, comma-separated. |
+| `{{ALLOWED_STATUS_PATHS_CSV}}` | Extra git-status paths beyond **owned paths** and **built-in tool noise** (`__pycache__`, `.pytest_cache`, caches, `*.pyc`, …). Leave empty unless the task legitimately creates paths like `data/`. |
 | `{{BUILD_OR_TEST_COMMAND}}` | Real repo verification command, such as `npm run build` or `pytest`. |
 | `{{CONVENTION_FILES}}` | Read-only files the worker should inspect before editing. |
 | `{{ENGINE_BUILD}}` | Engine name for the repo-edit worker. |
@@ -32,9 +32,15 @@ Use this for narrowly scoped app pages, route additions, component changes, scri
 
 ## Checks
 
-The check verifies four things: `notes.md` exists in the scratch task directory, required repo paths exist, required text appears in owned files, the configured build/test command passes, and `git status --porcelain` contains only owned or allowlisted paths.
+The check verifies four things: `notes.md` exists in the scratch task directory, required repo paths exist, required text appears in owned files, the configured build/test command passes, and `git status --porcelain` contains only owned paths, task-specific `--allowed-status` extras, or **built-in tool noise**.
+
+Built-in noise (always allowed, no placeholder needed): `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.nox/`, `*.pyc` / `*.pyo` / `*.pyd`, and similar runner caches. See `checks/check_repo_feature.py` (`DEFAULT_NOISE_*`).
 
 This cannot be gamed by creating a loose artifact in the task directory because the real repo command executes in `{{REPO_PATH}}` and the git porcelain check catches unrelated edits.
+
+## Fixture seed `.gitignore`
+
+For greenfield / bakeoff seeds, copy `seed.gitignore` into the seed repo as `.gitignore` and **commit it before the run**. That keeps pytest bytecode out of `git status` even under older check copies. Do **not** rely on workers to invent `.gitignore` (that fails ownership unless the path is owned).
 
 ## Mix with
 
@@ -51,3 +57,5 @@ Never run `git add -A` in a checkout with untracked scratch files. Stage specifi
 The worker's `notes.md` belongs in the task directory, not the repo. The repo check should assert real source changes and git cleanliness; notes are just the build report.
 
 `expect_files` is asserted before checks run. Do not put build artifacts, screenshots, or other check-produced files there.
+
+**Never re-run a frontier model matrix on allowlist / status noise.** If the check tail shows the build/tests already passed (e.g. `N passed`) and the only FAIL lines are `unexpected repo change…` for tool noise or a missing allowlist entry you can fix in one line: fix the check / seed `.gitignore`, re-run **only the check command** against existing worktrees ($0 model tokens). Do not `ringer.py run` the matrix again, and do not treat Ringer’s automatic attempt-2 as model-quality evidence. Re-run workers only when substance failed (tests red, missing required text, real source-path ownership breach).

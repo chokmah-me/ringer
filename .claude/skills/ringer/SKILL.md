@@ -136,6 +136,32 @@ the check's failure output.
   case-insensitive and flexible matching for structure, and reserve hard
   failure for substance: missing evidence, fabricated content, code that
   doesn't run.
+- **repo-feature + pytest:** the kit check always allowlists tool noise
+  (`__pycache__`, `.pytest_cache`, caches, `*.pyc`, …). For audition
+  fixtures, also commit `templates/repo-feature/seed.gitignore` into the
+  seed before the run. Do not auto-allow worker-invented `.gitignore`.
+
+## After FAIL — before you re-run
+
+**Never retry a frontier matrix on allowlist / status noise.**
+
+If `check_output_tail` (or the Ringside check panel) shows the
+**build/test command already passed** (e.g. `N passed` / exit 0) and the
+only FAIL lines are `unexpected repo change outside owned/allowed paths`
+for tool artifacts (`__pycache__`, `.pytest_cache`, caches) — or a check
+allowlist bug you can fix in one line:
+
+1. Fix the check defaults / `--allowed-status` / seed `.gitignore`
+   (kit: `templates/repo-feature`).
+2. Re-run **only the check command** against the existing worktrees
+   ($0 model tokens).
+3. **Do not** `ringer.py run` the matrix again, and **do not** count
+   Ringer’s automatic attempt-2 as evidence about model quality.
+
+Re-run workers only when substance failed (tests red, missing required
+text, real ownership breach of source paths). Lesson: 2026-07-16 Kimi K3
+vs Opus/Fable bakeoff (~$9 burned on false ownership FAILs after green
+pytest).
 
 ## Pattern playbook
 
@@ -286,7 +312,10 @@ someone's untracked scratch files.
 2. For any retried or failed task, read the raw worker log in
    `<workdir>/logs/` before deciding anything. Retries that passed on
    attempt 2 often reveal a spec ambiguity worth fixing in your next
-   manifest.
+   manifest. **Classify FAIL as substance vs harness first** (tests red
+   vs green-tests + status-noise only). Harness/allowlist noise → fix
+   check and re-check only; never re-run the frontier matrix (see
+   “After FAIL — before you re-run”).
 3. Spot-check at least one PASSING task's artifact per run. The check
    catches most laziness; you catch the rest.
 4. Failures with useless error messages mean your CHECK needs work, not

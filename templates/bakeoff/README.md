@@ -47,3 +47,4 @@ This catches the specific bakeoff failure mode from prior runs: task keys named 
 - Keep scenario wording identical across a row. Small wording changes ruin comparability.
 - A harness failure is a result. Record it instead of hiding it.
 - Verify the run state or session metadata, not just the task key, before claiming a model won.
+- For **code-feature** cells built on `repo-feature`: use that kit’s check (built-in `__pycache__` / cache noise allowlist) and commit `templates/repo-feature/seed.gitignore` into fixture seeds. If tests already passed and the only FAIL is git-status noise, fix the check and re-check only — do not re-run the frontier matrix.

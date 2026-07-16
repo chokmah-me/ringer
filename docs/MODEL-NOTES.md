@@ -170,6 +170,29 @@ checks and raw logs support — no vibes, no worker self-reports.
   (Ran through an ad-hoc copy of the opencode engine block — the per-task
   `model` field now makes that unnecessary.)
 
+## kimi-k3 via opencode (`openrouter/moonshotai/kimi-k3`)
+
+- 2026-07-16 — first outing: harness probe + frontier bakeoff vs
+  `claude-opus-4.8` and `claude-fable-5` on a medium `code-feature`
+  (priority-task-queue fixture: implement API+CLI until 15 pytest pass).
+  **Quality:** substance PASS attempt 1 (15/15 pytest, notes, owned paths)
+  — same contract pass as Opus and Fable. Ringer recorded FAIL only because
+  the check disallowed pytest `__pycache__` (fixture allowlist bug; re-check
+  with pycache allowlisted → PASS all three). **Throughput:** ~17 min wall
+  vs Opus ~3.5 min / Fable ~3 min; heavy reasoning + digression (e.g.
+  disassembling `.pyc`). **Cost:** list $3/$15 (cheaper sticker than Opus
+  $5/$25 and Fable $10/$50); OpenCode logged `cost:0` for K3 so $/task
+  metering is incomplete — Opus attempt-1 log sum ~$0.54, Fable ~$0.91.
+  **Harness notes:** (1) OpenCode 1.17.15 models.dev cache lacked K3 —
+  registered in `~/.config/opencode/opencode.jsonc` under
+  `provider.openrouter.models.moonshotai/kimi-k3`. (2) Windows
+  `opencode.cmd` truncates multiline `{spec}` argv at newlines — use
+  single-line specs. **Routing:** probation for cost-sensitive
+  `code-feature`; prefer over Fable on this difficulty; keep Opus when
+  latency matters; do not set as opencode default; n=1 — need more
+  scenarios before proven. Artifacts:
+  `~/.ringer/auditions/kimi-k3-vs-frontier/comparison.md`.
+
 ## kimi-k2.6 (`moonshotai/kimi-k2.6`, subject-model evidence via OpenRouter)
 
 - 2026-07-07 — Benchmark Suite 2.0 operator eval, killed by Jon at ~4.5h.

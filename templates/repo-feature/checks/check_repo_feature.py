@@ -8,15 +8,51 @@ import pathlib
 import subprocess
 import sys
 
+# Tool / bytecode noise that pytest and other runners leave untracked.
+# Always allowed in git status — do not require manifest authors to remember these.
+# (2026-07-16: missing this burned a frontier bakeoff on false ownership FAILs.)
+DEFAULT_NOISE_DIR_NAMES = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+        ".hypothesis",
+        ".pytype",
+        "htmlcov",
+        ".coverage",
+    }
+)
+DEFAULT_NOISE_SUFFIXES = (".pyc", ".pyo", ".pyd")
+
 
 def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def path_is_noise(path: str) -> bool:
+    """True if path is pytest/tool bytecode or cache noise (any depth)."""
+    normalized = path.strip().replace("\\", "/").rstrip("/")
+    if not normalized:
+        return False
+    parts = [p for p in normalized.split("/") if p and p != "."]
+    if any(part in DEFAULT_NOISE_DIR_NAMES for part in parts):
+        return True
+    base = parts[-1] if parts else ""
+    if base.startswith(".coverage"):
+        return True
+    lower = base.lower()
+    return any(lower.endswith(suffix) for suffix in DEFAULT_NOISE_SUFFIXES)
+
+
 def path_allowed(path: str, allowed: list[str]) -> bool:
-    normalized = path.strip().rstrip("/")
+    if path_is_noise(path):
+        return True
+    normalized = path.strip().replace("\\", "/").rstrip("/")
     for raw in allowed:
-        candidate = raw.strip().rstrip("/")
+        candidate = raw.strip().replace("\\", "/").rstrip("/")
         if not candidate:
             continue
         if normalized == candidate or normalized.startswith(candidate + "/"):
@@ -30,9 +66,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--owned", required=True, help="Comma-separated repo paths the worker may change")
-    parser.add_argument("--allowed-status", default="", help="Additional comma-separated paths allowed in git status")
+    parser.add_argument(
+        "--allowed-status",
+        default="",
+        help="Additional comma-separated paths allowed in git status "
+        "(beyond owned paths and built-in tool noise like __pycache__)",
+    )
     parser.add_argument("--required-paths", default="", help="Comma-separated repo paths that must exist")
-    parser.add_argument("--required-text", default="", help="Comma-separated text snippets that must appear somewhere in owned files")
+    parser.add_argument(
+        "--required-text",
+        default="",
+        help="Comma-separated text snippets that must appear somewhere in owned files",
+    )
     parser.add_argument("--build-command", required=True)
     parser.add_argument("--notes", default="notes.md")
     args = parser.parse_args()
@@ -100,11 +145,23 @@ def main() -> int:
             fails.append(f"unexpected repo change outside owned/allowed paths: {line}")
 
     if fails:
-        print("FAIL:")
+        status_only = all(f.startswith("unexpected repo change outside owned/allowed paths:") for f in fails)
+        if status_only:
+            print("FAIL (git-status ownership; build/tests already passed):")
+            print(
+                "  Hint: tool noise (__pycache__, .pytest_cache, …) is allowlisted by default. "
+                "If this is only an allowlist bug, fix --allowed-status / seed.gitignore and "
+                "re-run THIS check only — do not re-run frontier model workers."
+            )
+        else:
+            print("FAIL:")
         for fail in fails:
             print(f" - {fail}")
         return 1
-    print("PASS: notes exist, content assertions passed, build/tests passed, and git status is allowlisted")
+    print(
+        "PASS: notes exist, content assertions passed, build/tests passed, "
+        "and git status is allowlisted (owned + extras + built-in tool noise)"
+    )
     return 0
 
 

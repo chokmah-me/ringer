@@ -86,6 +86,8 @@ Each task gets its own directory, its own worker, its own log, and its own verdi
 
 > **Write checks that print why they fail.** A silent `exit 1` (the `git diff --quiet` style) costs you twice: the retry prompt gets no failure context to fix against, and the eval log records an undiagnosable row. `diff` beats `diff -q`; an assert with a message beats a bare test.
 
+> **repo-feature + pytest:** the kit check (`templates/repo-feature/checks/check_repo_feature.py`) always allowlists tool noise (`__pycache__`, `.pytest_cache`, caches, `*.pyc`, …). For bakeoff fixtures, also commit `templates/repo-feature/seed.gitignore` into the seed. If a check shows tests already green and the only FAIL is git-status noise, fix the allowlist and **re-run the check only** — do not re-run the frontier model matrix (see [CHANGELOG](CHANGELOG.md) 2026-07-16).
+
 **Identity**: runs are stamped with an orchestrator identity (shown in Ringside and eval rows). Resolution order: `--identity` > `FLEET_IDENTITY`/`RINGER_IDENTITY` env > a `.fleet-agent` file found walking up from the working directory (drop one in a repo root to give that repo's swarms their own name) > `identity_default` in config > short hostname.
 
 ### Manifest fields
@@ -297,6 +299,7 @@ A live snapshot of what `./ringer.py models --explore` and `docs/MODEL-NOTES.md`
 | `openrouter/x-ai/grok-4.5` | Second real-repo edit lane, fastest wall-clock | Attempt-1 on the real-edit bakeoff (fastest of all six lanes) |
 | `openrouter/anthropic/claude-opus-4.8` | Real-repo edits where deep reasoning matters | Passed the real-edit bakeoff, but only attempt 2 — attempt 1 hallucinated a "truncated" spec and substituted its own contract despite the full spec being present. Don't trust attempt-1 output against an exact contract without checking it used the given signatures |
 | `openrouter/anthropic/claude-fable-5` | Second general-purpose lane, same caveat as Opus | Same probe, same result: attempt-2 pass, identical spec-hallucination failure mode on attempt 1 |
+| `openrouter/moonshotai/kimi-k3` | Cost-sensitive medium `code-feature` (probation) | 2026-07-16 same-spec bakeoff vs Opus 4.8 + Fable 5: substance PASS attempt 1 (15/15 pytest); ~5× slower wall than Opus/Fable on that fixture. Prefer over Fable on sticker when latency can absorb; keep Opus for speed. n=1 — not proven. See `docs/MODEL-NOTES.md` |
 | `openrouter/z-ai/glm-5.2` | Structured code review, doc-swarm generation, persona/focus-group work, mechanical/template-driven builds | 3x proven-tier review passes; 3/3 doc-swarm; reliable cheap default for atomic write-and-verify tasks |
 | `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-pro` (native, no OpenRouter credits) | Atomic single-file tasks only: scripts, format conversions, fully-specified algorithms | Cheapest lanes by far, but froze 3/3 times on "read repo, then edit" tasks — halted to ask for a spec already in the prompt. Never route explore-then-modify work here |
 | `codex` (default engine) | Heavy real-repo feature work, review→fix roundtrips | Best-evidenced lane at weight: 8/8 feature tasks, 5 substantial ringer.py features, proven review→fix loop — none of the above have been tested at that scale |
@@ -311,6 +314,10 @@ Four rules are baked into every worker invocation. They all cost us real debuggi
 2. **Sandbox mode is always explicit** — default sandboxes silently resolve to read-only in temp directories and block every artifact write.
 3. **Verification executes the artifact** — an agent's own "done" is not evidence. Exit codes are.
 4. **Raw output only** — logs and eval rows carry verbatim worker output, never a summary. Anything that needs judgment reads the raw data.
+
+## Changelog
+
+Notable kit and harness fixes: see [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
