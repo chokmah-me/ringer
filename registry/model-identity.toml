@@ -68,6 +68,11 @@ display = "Kimi K2.7 Code"
 confidence = "verified"
 source = "manifest model field; OpenRouter slug moonshotai/kimi-k2.7-code"
 
+[engines.opencode.models."openrouter/moonshotai/kimi-k3"]
+display = "Kimi K3"
+confidence = "verified"
+source = "manifest model field; OpenRouter slug moonshotai/kimi-k3; 2026-07-16 code-feature bakeoff"
+
 [engines.opencode.models."openrouter/nvidia/nemotron-3-super-120b-a12b:free"]
 display = "Nemotron 3 Super 120B (free)"
 confidence = "verified"

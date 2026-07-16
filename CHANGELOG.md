@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)-style sections 
 
 ### Fixed
 
+- **Model identity:** registered `openrouter/moonshotai/kimi-k3` as display **Kimi K3** in `registry/model-identity.toml` so the scoreboard and Ringside show the model name (not only the raw slug).
 - **`templates/repo-feature` check no longer false-fails on pytest tool noise.**  
   `checks/check_repo_feature.py` always allowlists `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.nox/`, `*.pyc` / `*.pyo` / `*.pyd`, and similar runner caches at any path depth.  
   Previously, a green `pytest` that left `?? src/__pycache__/` marked the task FAIL, which triggered Ringer’s automatic retry and wasted frontier tokens (2026-07-16 Kimi K3 vs Opus/Fable bakeoff).
