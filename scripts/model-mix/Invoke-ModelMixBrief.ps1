@@ -102,7 +102,7 @@ Use only that file plus the system rules. Produce BRIEF and STANDING_MIX_JSON bl
             'code-review'  = @{ engine = $(if ($hasGrok) { 'grok' } elseif ($hasOpencode) { 'opencode' } else { 'codex' }); model = $(if ($hasGrok) { $null } elseif ($hasOpencode) { 'openrouter/z-ai/glm-5.2' } else { $null }) }
             'research'     = @{ engine = $(if ($hasOpencode) { 'opencode' } else { 'codex' }); model = $(if ($hasOpencode) { 'openrouter/anthropic/claude-sonnet-5' } else { $null }) }
             'docs'         = @{ engine = $(if ($hasOpencode) { 'opencode' } else { 'codex' }); model = $(if ($hasOpencode) { 'openrouter/z-ai/glm-5.2' } else { $null }) }
-            'probe'        = @{ engine = $(if ($hasOpencode) { 'opencode' } else { 'codex' }); model = $(if ($hasOpencode) { 'deepseek/deepseek-v4-flash' } else { $null }) }
+            'probe'        = @{ engine = $(if ($hasOpencode) { 'opencode' } else { 'codex' }); model = $(if ($hasOpencode) { 'deepseek/deepseek-v4-pro' } else { $null }) }
         }
         # Pool-aware override: model-pool lists GLM, DeepSeek flash/pro, composer, fable, opus, sonnet
         # Map composer to grok engine when available
@@ -144,7 +144,7 @@ Use only that file plus the system rules. Produce BRIEF and STANDING_MIX_JSON bl
                 default_engine    = $def.engine
                 default_model     = $def.model
                 by_task_type      = $by
-                explore_candidate = @{ engine = 'opencode'; model = 'deepseek/deepseek-v4-flash'; task_type = 'probe' }
+                explore_candidate = @{ engine = 'opencode'; model = 'deepseek/deepseek-v4-pro'; task_type = 'probe' }
                 notes             = "signals: $($p.signals -join ', '); heuristic primary=$primary"
             }
             $briefLines.Add("### $name")
@@ -329,11 +329,11 @@ Produce the BRIEF and STANDING_MIX_JSON fenced blocks now. No tool use required 
     }
 
     # Standing locks (enforced after LLM parse — prompt may be ignored)
-    # probe → opencode / deepseek/deepseek-v4-flash (user lock)
+    # probe → opencode / deepseek/deepseek-v4-pro (user lock)
     if ($null -ne $standing -and -not $standing.parse_error) {
         $probeLock = [ordered]@{
             engine = 'opencode'
-            model  = 'deepseek/deepseek-v4-flash'
+            model  = 'deepseek/deepseek-v4-pro'
         }
         $probeRationale = 'user lock: DeepSeek for probe'
         try {

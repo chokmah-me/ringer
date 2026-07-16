@@ -56,6 +56,6 @@ This job **does not** auto-run swarms or edit `config.toml`.
 
 | task_type | locked routing | where enforced |
 |-----------|----------------|----------------|
-| **probe** | `opencode` / `deepseek/deepseek-v4-flash` | `prompts/model-mix-brief.md` (constraint 7), heuristic fallback in `Invoke-ModelMixBrief.ps1` |
+| **probe** | `opencode` / `deepseek/deepseek-v4-pro` | `prompts/model-mix-brief.md` (constraint 7), heuristic fallback in `Invoke-ModelMixBrief.ps1` |
 
 Do not change probe defaults in generated briefs without updating that prompt lock.
