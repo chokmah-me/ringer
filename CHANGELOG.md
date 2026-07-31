@@ -12,7 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)-style sections 
 
 ### Notes
 
-- Evidence: five-round Chinese-model research bakeoff (`~/Documents/ringer-bakeoff-kit`, 25 opencode/OpenRouter attempts). Codex-on-Windows re-verification tracked in CATALOG after the follow-up smoke.
+- Evidence: five-round Chinese-model research bakeoff (`~/Documents/ringer-bakeoff-kit`, 25 opencode/OpenRouter attempts). Follow-up 2026-07-31: `codex.cmd` spawns natively (smoke blocked by ChatGPT usage limit until 2026-08-07); Unicode retest + Qwen research promotion recorded in CATALOG and bakeoff-kit `DECISIONS.md`.
 
 ## 2026-07-16
 
