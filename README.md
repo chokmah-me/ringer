@@ -29,7 +29,7 @@ manifest.json ──▶ ringer.py ──▶ N parallel workers (codex exec, each
 
 ## Quickstart
 
-Ringer runs on macOS and Linux (Windows via WSL) and needs Python 3.11+.
+Ringer runs on macOS, Linux, and **native Windows** (Python 3.11+). On Windows, use the `.cmd` engine shims (`codex.cmd`, `opencode.cmd`) as documented in `config.sample.toml`; checks run through Git Bash when present so bash-style check commands work.
 
 1. Install a worker CLI and sign in (Codex is the built-in default engine):
 

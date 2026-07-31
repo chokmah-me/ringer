@@ -3,6 +3,17 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)-style sections under dated headings.
 
+## 2026-07-30
+
+### Changed
+
+- **Windows platform status:** native Windows 11 is a supported host for `run`, `lint`, `--dry-run`, `models`, and `catalog --refresh` (no WSL required). Checks route through Git Bash on Windows (`ringer.py` `_run_check`); engine bins use npm `.cmd` shims (`codex.cmd`, `opencode.cmd`) per `config.sample.toml`.
+- **README Quickstart** and **CATALOG.md** no longer claim “Windows via WSL only.”
+
+### Notes
+
+- Evidence: five-round Chinese-model research bakeoff (`~/Documents/ringer-bakeoff-kit`, 25 opencode/OpenRouter attempts). Codex-on-Windows re-verification tracked in CATALOG after the follow-up smoke.
+
 ## 2026-07-16
 
 ### Fixed
