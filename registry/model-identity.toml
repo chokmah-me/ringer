@@ -115,10 +115,12 @@ source = "manifest model field; OpenRouter slug x-ai/grok-4.5"
 
 [engines.opencode.models."deepseek/deepseek-v4-pro"]
 display = "DeepSeek V4 Pro"
+access = "DeepSeek API"
 confidence = "verified"     # native DeepSeek provider via DEEPSEEK_API_KEY, no OpenRouter routing
 source = "manifest model field; native provider deepseek/deepseek-v4-pro"
 
 [engines.opencode.models."deepseek/deepseek-v4-flash"]
 display = "DeepSeek V4 Flash"
+access = "DeepSeek API"
 confidence = "verified"     # native DeepSeek provider via DEEPSEEK_API_KEY, no OpenRouter routing
 source = "manifest model field; native provider deepseek/deepseek-v4-flash"

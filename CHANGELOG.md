@@ -3,6 +3,15 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)-style sections under dated headings.
 
+## Unreleased
+
+### Fixed
+
+- **Windows: runs no longer die as `CANCELLED` @ attempts=0 from phantom console interrupts.**  
+  Interactive sessions (and some CPython builds) can deliver one or a rapid *pair* of spurious `CTRL_C_EVENT`s around asyncio startup. `WindowsInterruptShield` swallows **all** Ctrl+C / Ctrl+Break (and SIGINT) for the first 15s of a run, then requires a double-tap to cancel; `ProcessTree` captures via a tempfile (not `stdout=PIPE`) and uses `tasklist` on Windows; state/dashboard startup runs on a worker thread.
+- **Windows: Ringside HUD spawn is fully detached** (`CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`) so a run interrupt does not also stop the HUD.
+- **Worktrees re-run after cancel:** stale task worktree dirs are force-removed and recreated instead of failing with `worktree taskdir already exists`.
+
 ## 2026-07-30
 
 ### Changed

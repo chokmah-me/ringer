@@ -82,6 +82,12 @@ access = "OpenRouter API"
 display = "GLM 5.2"
 confidence = "verified"
 source = "fixture"
+
+[engines.opencode.models."deepseek/deepseek-v4-pro"]
+display = "DeepSeek V4 Pro"
+access = "DeepSeek API"
+confidence = "verified"
+source = "fixture"
 """,
         encoding="utf-8",
     )
@@ -140,6 +146,7 @@ class ModelDbTests(unittest.TestCase):
             hud_port=8700,
             hud_app_path=None,
             allow_full_access=False,
+            check_timeout_s=ringer.CHECK_TIMEOUT_S,
             eval=EvalConfig(backend="jsonl", jsonl_path=self.log_path),
             engines={},
             artifact=ArtifactConfig(
@@ -168,7 +175,7 @@ class ModelDbTests(unittest.TestCase):
         )
 
     def count_attempts(self) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        with contextlib.closing(sqlite3.connect(self.db_path)) as conn:
             return int(conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0])
 
     def test_schema_creation_uses_wal_mode(self) -> None:
@@ -210,9 +217,14 @@ class ModelDbTests(unittest.TestCase):
         self.assertEqual(1, result.skipped)
         self.assertEqual(2, second.attempts_inserted)
         self.assertEqual(2, self.count_attempts())
-        with sqlite3.connect(self.db_path) as conn:
+        with contextlib.closing(sqlite3.connect(self.db_path)) as conn:
             self.assertEqual(1, conn.execute("SELECT COUNT(*) FROM catalog_models").fetchone()[0])
-            self.assertEqual(2, conn.execute("SELECT COUNT(*) FROM identity").fetchone()[0])
+            self.assertEqual(3, conn.execute("SELECT COUNT(*) FROM identity").fetchone()[0])
+            deepseek = conn.execute(
+                "SELECT access FROM identity WHERE model_key = ?",
+                ("deepseek/deepseek-v4-pro",),
+            ).fetchone()
+            self.assertEqual("DeepSeek API", deepseek[0])
 
     def test_sync_consumes_only_new_bytes_and_rebuilds_after_truncation(self) -> None:
         write_jsonl(self.log_path, [attempt(run_id="run-1")])
@@ -255,8 +267,8 @@ class ModelDbTests(unittest.TestCase):
         second_line = json.dumps(attempt(run_id="run-2"))
         cut_at = len(second_line) // 2
         partial_second = second_line[:cut_at]
-        partial_start = len(first_line.encode("utf-8"))
         self.log_path.write_text(first_line + partial_second, encoding="utf-8")
+        partial_start = self.log_path.read_bytes().find(partial_second.encode("utf-8"))
 
         result = sync_read_model_db(
             self.db_path,
@@ -426,11 +438,22 @@ class ModelDbTests(unittest.TestCase):
         codex = registry.resolve("codex", "")
         listed = registry.resolve("opencode", "openrouter/z-ai/glm-5.2")
         unlisted = registry.resolve("opencode", "openrouter/vendor/model")
+        deepseek_listed = registry.resolve("opencode", "deepseek/deepseek-v4-pro")
+        deepseek_unlisted = registry.resolve("opencode", "deepseek/vendor/model")
         unknown = registry.resolve("custom-engine", "custom-model")
 
         self.assertEqual(("GPT-5.5", "Codex CLI", "OAuth plan"), (codex.model_display, codex.harness, codex.access))
         self.assertEqual(("GLM 5.2", "OpenCode", "OpenRouter API"), (listed.model_display, listed.harness, listed.access))
         self.assertEqual(("vendor/model", "OpenCode", "OpenRouter API"), (unlisted.model_display, unlisted.harness, unlisted.access))
+        self.assertEqual(
+            ("DeepSeek V4 Pro", "OpenCode", "DeepSeek API"),
+            (deepseek_listed.model_display, deepseek_listed.harness, deepseek_listed.access),
+        )
+        self.assertEqual(
+            ("vendor/model", "OpenCode", "DeepSeek API"),
+            (deepseek_unlisted.model_display, deepseek_unlisted.harness, deepseek_unlisted.access),
+        )
+        self.assertEqual("fallback", deepseek_unlisted.confidence)
         self.assertEqual(("custom-engine", "custom-engine", "unknown"), (unknown.model_display, unknown.harness, unknown.access))
 
     def test_models_json_includes_identity_fields(self) -> None:
@@ -439,6 +462,7 @@ class ModelDbTests(unittest.TestCase):
             [
                 attempt(run_id="run-1", engine="codex", model="", task_type="site-build"),
                 attempt(run_id="run-2", engine="opencode", model="openrouter/vendor/model"),
+                attempt(run_id="run-3", engine="opencode", model="deepseek/deepseek-v4-pro"),
             ],
         )
         out = io.StringIO()
@@ -454,6 +478,9 @@ class ModelDbTests(unittest.TestCase):
         self.assertEqual("vendor/model", by_model["openrouter/vendor/model"]["model_display"])
         self.assertEqual("OpenCode", by_model["openrouter/vendor/model"]["harness"])
         self.assertEqual("OpenRouter API", by_model["openrouter/vendor/model"]["access"])
+        self.assertEqual("DeepSeek V4 Pro", by_model["deepseek/deepseek-v4-pro"]["model_display"])
+        self.assertEqual("OpenCode", by_model["deepseek/deepseek-v4-pro"]["harness"])
+        self.assertEqual("DeepSeek API", by_model["deepseek/deepseek-v4-pro"]["access"])
 
     def test_models_override_log_without_db_does_not_touch_default_db(self) -> None:
         fixture_log = self.root / "fixture-runs.jsonl"

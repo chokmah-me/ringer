@@ -181,6 +181,7 @@ class AppConfig:
     hud_port: int
     hud_app_path: Path | None
     allow_full_access: bool
+    check_timeout_s: int
     eval: EvalConfig
     engines: dict[str, EngineConfig]
     artifact: ArtifactConfig
@@ -207,6 +208,9 @@ class AppConfig:
         identity_default = optional_string(data.get("identity_default"))
         hud_app_path = optional_path(data.get("hud_app_path"))
         allow_full_access = bool(data.get("allow_full_access", False))
+        check_timeout_s = int(data.get("check_timeout_s", CHECK_TIMEOUT_S))
+        if check_timeout_s <= 0:
+            raise ValueError("check_timeout_s must be positive")
         eval_config = load_eval_config(data.get("eval"), state_dir)
         engines = load_engines(data.get("engines"))
         artifact_config = load_artifact_config(data.get("artifact"), state_dir)
@@ -218,6 +222,7 @@ class AppConfig:
             hud_port=hud_port,
             hud_app_path=hud_app_path,
             allow_full_access=allow_full_access,
+            check_timeout_s=check_timeout_s,
             eval=eval_config,
             engines=engines,
             artifact=artifact_config,
@@ -838,23 +843,214 @@ class VerifyResult:
     missing_files: tuple[str, ...] = ()
 
 
+class WindowsInterruptShield:
+    """Block phantom console interrupts on Windows during run startup.
+
+    Interactive Windows consoles (and some CPython builds) can deliver one or
+    more spurious CTRL_C_EVENT bursts around asyncio startup / short subprocess
+    captures. A single event, or a rapid double, aborts the run with CANCELLED
+    @ attempts=0 before any worker starts.
+
+    Policy:
+    - During ``grace_s`` (default 15s): swallow *all* CTRL_C / CTRL_BREAK and
+      also replace SIGINT with a no-op. Double-tap does **not** cancel yet —
+      observed phantoms often arrive as a pair within <100ms.
+    - After grace: require two presses within ``double_tap_s`` to cancel.
+    - ``disarm()`` / uninstall restores normal Ctrl+C immediately.
+    """
+
+    CTRL_C_EVENT = 0
+    CTRL_BREAK_EVENT = 1
+
+    def __init__(self, *, grace_s: float = 15.0, double_tap_s: float = 1.5) -> None:
+        self.grace_s = grace_s
+        self.double_tap_s = double_tap_s
+        self._started = time.monotonic()
+        self._last_hit: float | None = None
+        self._grace_hits = 0
+        self._handler: Any = None
+        self._installed = False
+        self._armed = True
+        self._prev_sigint: Any = None
+        self._sigint_installed = False
+
+    def _in_grace(self, now: float | None = None) -> bool:
+        t = time.monotonic() if now is None else now
+        return (t - self._started) < self.grace_s
+
+    def _note(self, msg: str) -> None:
+        with contextlib.suppress(Exception):
+            sys.stderr.write(msg)
+            sys.stderr.flush()
+
+    def _should_swallow(self) -> bool:
+        """Return True if this interrupt should be absorbed (no KeyboardInterrupt)."""
+        if not self._armed:
+            return False
+        now = time.monotonic()
+        # Same physical event can hit both SetConsoleCtrlHandler and signal.SIGINT
+        # within a few ms — never treat that as a deliberate double-tap.
+        if self._last_hit is not None and (now - self._last_hit) < 0.08:
+            return True
+        if self._in_grace(now):
+            self._grace_hits += 1
+            # Only print once per half-second so a phantom pair does not spam.
+            if self._grace_hits == 1 or (
+                self._last_hit is None or (now - self._last_hit) > 0.5
+            ):
+                self._note(
+                    "Ignoring startup interrupt "
+                    f"(Ctrl+C armed after {self.grace_s:.0f}s; then press twice to cancel).\n"
+                )
+            self._last_hit = now
+            return True
+        # After grace: two distinct presses within double_tap_s cancel.
+        if self._last_hit is not None and (now - self._last_hit) <= self.double_tap_s:
+            self._armed = False
+            self._note("Second Ctrl+C — cancelling run.\n")
+            return False
+        self._last_hit = now
+        self._note("Interrupt received (press Ctrl+C again within 1.5s to cancel).\n")
+        return True
+
+    def install(self) -> bool:
+        if os.name != "nt" or self._installed:
+            return False
+        try:
+            import ctypes
+            from ctypes import wintypes
+        except Exception:
+            return False
+
+        shield = self
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+        def _handler(ctrl_type: int) -> bool:
+            if ctrl_type not in (
+                WindowsInterruptShield.CTRL_C_EVENT,
+                WindowsInterruptShield.CTRL_BREAK_EVENT,
+            ):
+                return False
+            # True = we handled it (do not deliver KeyboardInterrupt).
+            return bool(shield._should_swallow())
+
+        try:
+            if not ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True):
+                return False
+        except Exception:
+            return False
+        self._handler = _handler
+        self._installed = True
+        self._started = time.monotonic()
+        self._grace_hits = 0
+        self._last_hit = None
+        self._armed = True
+
+        # Belt-and-suspenders: some paths raise KeyboardInterrupt via signal
+        # even when a console handler returns True (or races with it).
+        with contextlib.suppress(Exception):
+            self._prev_sigint = signal.getsignal(signal.SIGINT)
+
+            def _sigint_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
+                if shield._should_swallow():
+                    return
+                prev = shield._prev_sigint
+                if prev in (None, signal.SIG_DFL):
+                    raise KeyboardInterrupt
+                if prev is signal.SIG_IGN:
+                    return
+                if callable(prev):
+                    prev(signum, frame)
+                    return
+                raise KeyboardInterrupt
+
+            signal.signal(signal.SIGINT, _sigint_handler)
+            self._sigint_installed = True
+        return True
+
+    def uninstall(self) -> None:
+        if self._sigint_installed:
+            with contextlib.suppress(Exception):
+                signal.signal(signal.SIGINT, self._prev_sigint or signal.SIG_DFL)
+            self._sigint_installed = False
+            self._prev_sigint = None
+        if self._installed and self._handler is not None:
+            with contextlib.suppress(Exception):
+                import ctypes
+
+                ctypes.windll.kernel32.SetConsoleCtrlHandler(self._handler, False)
+        self._installed = False
+        self._handler = None
+        self._armed = False
+
+    def __enter__(self) -> "WindowsInterruptShield":
+        self.install()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.uninstall()
+
+
 class ProcessTree:
     @staticmethod
-    def read() -> tuple[dict[int, list[int]], dict[int, str]]:
+    def _run_capture(argv: list[str], timeout: float = 5) -> str:
+        """Run a short subprocess capturing stdout WITHOUT the PIPE reader-thread path.
+
+        On the reduced Microsoft Store CPython build, subprocess.run(stdout=PIPE)
+        inside a running asyncio loop delivers a spurious SIGINT while the stdout
+        reader thread is starting. Redirecting to a temp file skips that thread
+        entirely; the file is read back and removed.
+        """
+        import tempfile
+
+        fd, tmp_path = tempfile.mkstemp(prefix="ringer-cap-", suffix=".out")
         try:
-            proc = subprocess.run(
-                ["ps", "-eo", "pid=,ppid=,args="],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5,
-            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                subprocess.run(
+                    argv,
+                    stdout=f,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=timeout,
+                )
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                return f.read()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+    @staticmethod
+    def read() -> tuple[dict[int, list[int]], dict[int, str]]:
+        if os.name == "nt":
+            # `ps` is POSIX-only. Use tasklist and map PID -> image name
+            # (basic tasklist has no PPID column).
+            children: dict[int, list[int]] = {}
+            commands: dict[int, str] = {}
+            try:
+                output = ProcessTree._run_capture(["tasklist", "/FO", "CSV", "/NH"])
+            except Exception:
+                return {}, {}
+            for line in output.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # CSV: "image.exe","pid","session","session#","mem"
+                parts = [p.strip('"') for p in line.split('","')]
+                if len(parts) < 2:
+                    continue
+                try:
+                    pid = int(parts[1])
+                except ValueError:
+                    continue
+                commands[pid] = parts[0]
+            return children, commands
+        try:
+            output = ProcessTree._run_capture(["ps", "-eo", "pid=,ppid=,args="])
         except Exception:
             return {}, {}
         children: dict[int, list[int]] = {}
         commands: dict[int, str] = {}
-        for line in proc.stdout.splitlines():
+        for line in output.splitlines():
             parts = line.strip().split(None, 2)
             if len(parts) < 2:
                 continue
@@ -4776,6 +4972,14 @@ class ModelIdentityRegistry:
                 confidence="fallback",
                 source="unlisted OpenRouter slug",
             )
+        if engine_key == "opencode" and raw_model_key.startswith("deepseek/"):
+            return ModelIdentity(
+                model_display=raw_model_key.removeprefix("deepseek/"),
+                harness=(meta.harness if meta else "OpenCode"),
+                access="DeepSeek API",
+                confidence="fallback",
+                source="unlisted native DeepSeek slug",
+            )
         if meta is not None and lookup_key:
             return ModelIdentity(
                 model_display=lookup_key,
@@ -4840,7 +5044,7 @@ def load_model_identity_registry(path: Path | None = None) -> ModelIdentityRegis
             identities[(engine, model_key)] = ModelIdentity(
                 model_display=model_log_text(raw_model.get("display")) or model_key,
                 harness=harness,
-                access=access,
+                access=model_log_text(raw_model.get("access")) or access,
                 confidence=model_log_text(raw_model.get("confidence")),
                 source=model_log_text(raw_model.get("source")),
             )
@@ -6724,7 +6928,28 @@ def run_models_command(config: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _check_env() -> dict[str, str] | None:
+    """Environment for check subprocesses on Windows.
+
+    The Git Bash (MSYS2 runtime) used to run checks mangles POSIX-looking
+    arguments — e.g. ``/mnt/c/Users/...`` becomes
+    ``C:/Program Files/Git/mnt/c/Users/...`` — when it spawns a native Windows
+    executable such as ``wsl.exe``. Checks that call WSL pass real POSIX paths,
+    so disable argument path conversion for the whole check process. Off
+    Windows, checks inherit the parent environment.
+    """
+    if os.name != "nt":
+        return None
+    env = dict(os.environ)
+    env["MSYS_NO_PATHCONV"] = "1"
+    env["MSYS2_ARG_CONV_EXCL"] = "*"
+    return env
+
+
 class Verifier:
+    def __init__(self, check_timeout_s: int = CHECK_TIMEOUT_S) -> None:
+        self.check_timeout_s = check_timeout_s
+
     async def verify(self, task: TaskSpec, taskdir: Path) -> VerifyResult:
         check_returncode, check_timed_out, output = await self._run_check(task.check, taskdir)
         missing_files = tuple(
@@ -6764,17 +6989,51 @@ class Verifier:
         return candidate if candidate.is_absolute() else taskdir / candidate
 
     @staticmethod
-    async def _run_check(command: str, cwd: Path) -> tuple[int | None, bool, str]:
+    def _resolve_check_bash() -> str | None:
+        """Locate a real POSIX bash for running checks on Windows.
+
+        ``shutil.which("bash")`` can resolve to the Microsoft Store App
+        Execution Alias under %LOCALAPPDATA%\\Microsoft\\WindowsApps\\bash.EXE.
+        That shim's environment lacks C:\\Windows\\System32 on PATH, so Windows
+        tools like ``wsl`` are not found from inside checks. Prefer a genuine
+        Git for Windows bash; only fall back to which() when it is not a Store
+        shim. Returns None when no usable bash exists (caller fails the check).
+        """
+        if os.name != "nt":
+            return shutil.which("bash") or "bash"
+        candidates = (
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        )
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        found = shutil.which("bash")
+        if found and "WindowsApps" not in found:
+            return found
+        return None
+
+    async def _run_check(self, command: str, cwd: Path) -> tuple[int | None, bool, str]:
         # Checks are written in POSIX/bash syntax. asyncio.create_subprocess_shell
         # runs them through cmd.exe on Windows, which chokes on bash constructs
         # like `{ ...; exit 1; }`. Route through Git Bash explicitly instead.
         if os.name == "nt":
-            bash_exe = shutil.which("bash") or r"C:\Program Files\Git\usr\bin\bash.exe"
+            bash_exe = Verifier._resolve_check_bash()
+            if bash_exe is None:
+                return (
+                    1,
+                    False,
+                    "[ringer] no usable POSIX bash found for checks on Windows; "
+                    "install Git for Windows so the check can run.",
+                )
             proc = await asyncio.create_subprocess_exec(
                 bash_exe,
                 "-c",
                 command,
                 cwd=str(cwd),
+                env=_check_env(),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -6790,7 +7049,7 @@ class Verifier:
             )
         timed_out = False
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=CHECK_TIMEOUT_S)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=self.check_timeout_s)
         except asyncio.TimeoutError:
             timed_out = True
             terminate_process_group(proc)
@@ -6801,7 +7060,7 @@ class Verifier:
                 stdout, _ = await proc.communicate()
         output = stdout.decode("utf-8", errors="replace") if stdout else ""
         if timed_out:
-            output += f"\n[ringer.py] check timed out after {CHECK_TIMEOUT_S}s\n"
+            output += f"\n[ringer.py] check timed out after {self.check_timeout_s}s\n"
         return proc.returncode, timed_out, output
 
 
@@ -6845,7 +7104,7 @@ class RingerRunner:
             else None
         )
         self.logger = EvalLogger(config.eval)
-        self.verifier = Verifier()
+        self.verifier = Verifier(check_timeout_s=config.check_timeout_s)
         self.semaphore = asyncio.Semaphore(manifest.max_parallel)
         self.active_processes: dict[int, asyncio.subprocess.Process] = {}
 
@@ -6853,9 +7112,13 @@ class RingerRunner:
         self.manifest.workdir.mkdir(parents=True, exist_ok=True)
         final_state = False
         try:
-            self.state_writer.start()
+            # start() performs a synchronous flush that runs ProcessTree.read()
+            # (a blocking subprocess). Running it on the loop thread trips a
+            # phantom SIGINT on the Microsoft Store CPython build while the main
+            # thread is inside an OS wait. Run it on a worker thread instead.
+            await asyncio.to_thread(self.state_writer.start)
             if self.dashboard is not None:
-                self.state_writer.set_port(self.dashboard.start())
+                await asyncio.to_thread(self.state_writer.set_port, self.dashboard.start())
             await asyncio.gather(*(self._run_task(runtime) for runtime in self.runtimes))
             final_state = True
             return 0 if all(runtime.status == "pass" for runtime in self.runtimes) else 1
@@ -7039,7 +7302,16 @@ class RingerRunner:
         if self.manifest.worktrees and self.manifest.repo is not None:
             taskdir.parent.mkdir(parents=True, exist_ok=True)
             if taskdir.exists():
-                return False, f"worktree taskdir already exists: {taskdir}"
+                # Cancelled / crashed runs leave the worktree dir behind; re-runs
+                # used to hard-fail with "already exists". Remove the stale tree
+                # (and prune the repo's worktree list) then recreate.
+                removed, remove_error = await self._remove_stale_worktree(taskdir)
+                if not removed:
+                    return False, remove_error or f"worktree taskdir already exists: {taskdir}"
+                append_text(
+                    runtime.log_path,
+                    f"[ringer.py] removed stale worktree at {taskdir}\n",
+                )
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "-C",
@@ -7059,6 +7331,49 @@ class RingerRunner:
                 return False, message.strip() or "git worktree add failed"
             return True, None
         taskdir.mkdir(parents=True, exist_ok=True)
+        return True, None
+
+    async def _remove_stale_worktree(self, taskdir: Path) -> tuple[bool, str | None]:
+        """Best-effort remove of a leftover worktree path so a re-run can proceed."""
+        repo = self.manifest.repo
+        if repo is None:
+            return False, "no repo configured for worktrees"
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repo),
+            "worktree",
+            "remove",
+            "--force",
+            str(taskdir),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0 and not taskdir.exists():
+            return True, None
+        # Not a registered worktree, or remove partially failed — prune + rmtree.
+        prune = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repo),
+            "worktree",
+            "prune",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await prune.communicate()
+        if taskdir.exists():
+            try:
+                shutil.rmtree(taskdir)
+            except OSError as exc:
+                detail = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
+                message = f"could not remove stale worktree {taskdir}: {exc}"
+                if detail:
+                    message = f"{message}\n{detail}"
+                return False, message
         return True, None
 
     async def _cleanup_worktree_on_pass(self, runtime: TaskRuntime) -> None:
@@ -8190,12 +8505,23 @@ def ensure_hud_running(config: AppConfig, *, open_browser: bool) -> None:
         with contextlib.suppress(Exception):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("ab") as log_file:
+                popen_kwargs: dict[str, Any] = {
+                    "stdout": log_file,
+                    "stderr": log_file,
+                    "stdin": subprocess.DEVNULL,
+                }
+                if os.name == "nt":
+                    # Detach from the interactive console so a CTRL_C_EVENT on
+                    # the run process does not also tear down Ringside.
+                    popen_kwargs["creationflags"] = (
+                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                        | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                    )
+                else:
+                    popen_kwargs["start_new_session"] = True
                 subprocess.Popen(
                     [sys.executable, str(Path(__file__).resolve()), "hud", "--no-open", "--port", str(port)],
-                    stdout=log_file,
-                    stderr=log_file,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,
+                    **popen_kwargs,
                 )
         for _ in range(20):
             if hud_is_alive(port):
@@ -8386,17 +8712,21 @@ def main(argv: list[str] | None = None) -> int:
         preflight_engine_bins(manifest, config)
         if args.command == "run":
             start_catalog_auto_refresh()
-        if dashboard_enabled and not args.browser:
-            ensure_hud_running(config, open_browser=True)
-        return asyncio.run(
-            run_manifest(
-                manifest,
-                config=config,
-                identity=identity,
-                dashboard_enabled=dashboard_enabled,
-                force_browser=args.browser,
+        # Install the Windows interrupt shield before HUD spawn / asyncio so a
+        # phantom CTRL_C during browser open or loop startup cannot cancel the
+        # run. During the first 15s every Ctrl+C is ignored; after that, double-tap.
+        with WindowsInterruptShield(grace_s=15.0):
+            if dashboard_enabled and not args.browser:
+                ensure_hud_running(config, open_browser=True)
+            return asyncio.run(
+                run_manifest(
+                    manifest,
+                    config=config,
+                    identity=identity,
+                    dashboard_enabled=dashboard_enabled,
+                    force_browser=args.browser,
+                )
             )
-        )
     except KeyboardInterrupt:
         # A second Ctrl+C during teardown must not dump a nested traceback.
         with contextlib.suppress(KeyboardInterrupt):

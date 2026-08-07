@@ -125,9 +125,9 @@ class HudModelsTabTests(unittest.TestCase):
         self.assertFalse(default_db.with_name(default_db.name + "-shm").exists())
 
     def test_api_models_error_path_returns_200(self) -> None:
-        bad_parent = self.root / "not-a-directory"
-        bad_parent.write_text("file", encoding="utf-8")
-        self.log_path = bad_parent / "models.jsonl"
+        bad_log = self.root / "not-a-directory"
+        bad_log.mkdir()
+        self.log_path = bad_log
         _server, port = self.start_server()
 
         with urlopen(f"http://127.0.0.1:{port}/api/models", timeout=5) as response:

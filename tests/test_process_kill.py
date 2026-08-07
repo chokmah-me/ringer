@@ -117,5 +117,118 @@ class ProcessKillHelperTests(unittest.TestCase):
         asyncio.run(_run())
 
 
+class ProcessTreeCaptureTests(unittest.TestCase):
+    def test_run_capture_uses_tempfile_not_pipe(self) -> None:
+        """_run_capture must not use stdout=PIPE (phantom SIGINT on some Windows builds)."""
+        seen_kwargs: list[dict] = []
+
+        def fake_run(argv, **kwargs):  # noqa: ANN001, ANN003
+            seen_kwargs.append(kwargs)
+            stdout = kwargs.get("stdout")
+            if hasattr(stdout, "write"):
+                stdout.write("image.exe\",\"1234\",\"Session\",\"1\",\"1 K\"\n")
+            return SimpleNamespace(returncode=0)
+
+        with mock.patch.object(ringer.subprocess, "run", side_effect=fake_run):
+            out = ringer.ProcessTree._run_capture(["tasklist", "/FO", "CSV", "/NH"])
+
+        self.assertIn("1234", out)
+        self.assertEqual(len(seen_kwargs), 1)
+        self.assertIsNot(seen_kwargs[0].get("stdout"), ringer.subprocess.PIPE)
+        self.assertTrue(hasattr(seen_kwargs[0].get("stdout"), "write"))
+
+    def test_read_on_windows_uses_tasklist(self) -> None:
+        captured: list[list[str]] = []
+
+        def fake_capture(argv: list[str], timeout: float = 5) -> str:
+            captured.append(list(argv))
+            return '"python.exe","9999","Console","1","10 K"\n'
+
+        with (
+            mock.patch.object(ringer.os, "name", "nt"),
+            mock.patch.object(ringer.ProcessTree, "_run_capture", side_effect=fake_capture),
+        ):
+            children, commands = ringer.ProcessTree.read()
+
+        self.assertEqual(captured[0][:1], ["tasklist"])
+        self.assertEqual(commands.get(9999), "python.exe")
+        self.assertEqual(children, {})
+
+
+class WindowsInterruptShieldTests(unittest.TestCase):
+    def test_grace_period_swallows_double_phantom(self) -> None:
+        """Phantoms often arrive as a pair; both must be ignored during grace."""
+        shield = ringer.WindowsInterruptShield(grace_s=10.0, double_tap_s=5.0)
+        # Both hits during grace → swallow (True means "handled / no cancel").
+        # Rapid pair may share the 80ms debounce; either way must not cancel.
+        self.assertTrue(shield._should_swallow())
+        self.assertTrue(shield._should_swallow())
+        self.assertTrue(shield._armed)
+        time.sleep(0.1)
+        self.assertTrue(shield._should_swallow())  # still in grace after gap
+        self.assertTrue(shield._armed)
+
+    def test_after_grace_double_tap_cancels(self) -> None:
+        shield = ringer.WindowsInterruptShield(grace_s=0.0, double_tap_s=5.0)
+        shield._started = time.monotonic() - 1.0  # ensure past grace
+        self.assertTrue(shield._should_swallow())   # first post-grace
+        time.sleep(0.1)  # beyond 80ms debounce so this counts as a new press
+        self.assertFalse(shield._should_swallow())  # second → cancel
+        self.assertFalse(shield._armed)
+
+    def test_context_manager_noops_off_windows(self) -> None:
+        with mock.patch.object(ringer.os, "name", "posix"):
+            shield = ringer.WindowsInterruptShield()
+            with shield:
+                self.assertFalse(shield._installed)
+
+
+class CheckBashResolutionTests(unittest.TestCase):
+    """_resolve_check_bash must prefer real Git Bash over the Store WindowsApps shim."""
+
+    GIT_BASH = r"C:\Program Files\Git\usr\bin\bash.exe"
+    WINDOWSAPPS_BASH = r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.EXE"
+
+    def test_windows_prefers_git_bash_over_windowsapps_shim(self) -> None:
+        with (
+            mock.patch.object(ringer.os, "name", "nt"),
+            mock.patch.object(
+                ringer.os.path,
+                "isfile",
+                side_effect=lambda p: p == self.GIT_BASH,
+            ),
+            mock.patch.object(
+                ringer.shutil, "which", return_value=self.WINDOWSAPPS_BASH
+            ),
+        ):
+            self.assertEqual(ringer.Verifier._resolve_check_bash(), self.GIT_BASH)
+
+    def test_windows_falls_back_to_non_shim_which(self) -> None:
+        real = r"C:\tools\bash.exe"
+        with (
+            mock.patch.object(ringer.os, "name", "nt"),
+            mock.patch.object(ringer.os.path, "isfile", return_value=False),
+            mock.patch.object(ringer.shutil, "which", return_value=real),
+        ):
+            self.assertEqual(ringer.Verifier._resolve_check_bash(), real)
+
+    def test_windows_rejects_windowsapps_shim_when_no_git_bash(self) -> None:
+        with (
+            mock.patch.object(ringer.os, "name", "nt"),
+            mock.patch.object(ringer.os.path, "isfile", return_value=False),
+            mock.patch.object(
+                ringer.shutil, "which", return_value=self.WINDOWSAPPS_BASH
+            ),
+        ):
+            self.assertIsNone(ringer.Verifier._resolve_check_bash())
+
+    def test_posix_uses_which(self) -> None:
+        with (
+            mock.patch.object(ringer.os, "name", "posix"),
+            mock.patch.object(ringer.shutil, "which", return_value="/usr/bin/bash"),
+        ):
+            self.assertEqual(ringer.Verifier._resolve_check_bash(), "/usr/bin/bash")
+
+
 if __name__ == "__main__":
     unittest.main()
